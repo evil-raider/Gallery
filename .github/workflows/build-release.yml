@@ -1,0 +1,108 @@
+name: Build & Release APK
+
+# Builds the FOSS flavor of the app and publishes the signed APK as a GitHub Release.
+#
+# Triggers:
+#   - Pushing a tag like "v1.13.1" builds and releases that tag.
+#   - Manual run (workflow_dispatch) lets you type a tag name to build and release.
+#
+# Signing:
+#   - If the repository secrets SIGNING_STORE_FILE_BASE64, SIGNING_STORE_PASSWORD,
+#     SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD are set, the APK is signed with
+#     that release keystore.
+#   - Otherwise the workflow generates a throwaway keystore so the produced APK is
+#     still installable. Such builds are NOT upgrade-compatible with Play/official
+#     builds, so configure the secrets for real releases.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag/version name for the release (e.g. v1.13.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure signing keystore
+        run: |
+          KEYSTORE_PATH="${RUNNER_TEMP}/release.jks"
+          if [ -n "${{ secrets.SIGNING_STORE_FILE_BASE64 }}" ]; then
+            echo "Using release keystore from repository secrets."
+            echo "${{ secrets.SIGNING_STORE_FILE_BASE64 }}" | base64 --decode > "$KEYSTORE_PATH"
+            echo "SIGNING_KEY_ALIAS=${{ secrets.SIGNING_KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_PASSWORD=${{ secrets.SIGNING_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "SIGNING_STORE_PASSWORD=${{ secrets.SIGNING_STORE_PASSWORD }}" >> "$GITHUB_ENV"
+          else
+            echo "No signing secrets found; generating a throwaway keystore."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias ci \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=CI Build, OU=CI, O=Gallery, L=NA, S=NA, C=NA"
+            echo "SIGNING_KEY_ALIAS=ci" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "SIGNING_STORE_PASSWORD=android" >> "$GITHUB_ENV"
+          fi
+          echo "SIGNING_STORE_FILE=${KEYSTORE_PATH}" >> "$GITHUB_ENV"
+
+      - name: Build FOSS release APK
+        run: ./gradlew assembleFossRelease --stacktrace
+
+      - name: Collect APK
+        id: apk
+        run: |
+          APK="$(find app/build/outputs/apk/foss/release -name '*.apk' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+          DEST="gallery-${{ steps.meta.outputs.tag }}-foss-release.apk"
+          cp "$APK" "$DEST"
+          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gallery-foss-release
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          files: ${{ steps.apk.outputs.path }}
