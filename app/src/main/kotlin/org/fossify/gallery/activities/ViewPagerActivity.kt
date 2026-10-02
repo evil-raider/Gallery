@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
@@ -155,7 +156,7 @@ import org.fossify.gallery.helpers.MAX_PRINT_SIDE_SIZE
 import org.fossify.gallery.helpers.PATH
 import org.fossify.gallery.helpers.PORTRAIT_PATH
 import org.fossify.gallery.helpers.RECYCLE_BIN
-import org.fossify.gallery.helpers.AspectRatioSensorOrientationController
+import org.fossify.gallery.helpers.GluedMediaOrientationHelper
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
@@ -209,14 +210,6 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
     private var mIsOrientationLocked = false
 
-    private val mAspectRatioSensorController by lazy {
-        AspectRatioSensorOrientationController(
-            activity = this,
-            isOrientationLocked = { mIsOrientationLocked },
-            controlViews = { collectOverlayControlViews() },
-        )
-    }
-
     private var mMediaFiles = ArrayList<Medium>()
     private var mFavoritePaths = ArrayList<String>()
     private var mIgnoredPaths = ArrayList<String>()
@@ -262,7 +255,6 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         initBottomActions()
         mOriginalBrightness = window.updateBrightness(config.maxBrightness, mOriginalBrightness)
         setupOrientation()
-        mAspectRatioSensorController.onResume()
         refreshMenuItems()
 
         val filename = getCurrentMedium()?.name ?: mPath.getFilenameFromPath()
@@ -272,13 +264,11 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onPause() {
         super.onPause()
         stopSlideshow()
-        mAspectRatioSensorController.onPause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         ColorModeHelper.resetColorMode(this)
-        mAspectRatioSensorController.destroy()
 
         if (intent.extras?.containsKey(IS_VIEW_INTENT) == true) {
             config.temporarilyShowHidden = false
@@ -419,6 +409,10 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         initBottomActionsLayout()
+        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
+            // The window just rotated; re-glue the media so it keeps filling the screen.
+            applyGluedMediaTransform()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -848,7 +842,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     private fun toggleOrientation(orientation: Int) {
-        mAspectRatioSensorController.cancel()
+        resetGluedMediaTransform()
         requestedOrientation = orientation
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         refreshMenuItems()
@@ -999,7 +993,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         binding.bottomActions.bottomChangeOrientation.beVisibleIf(visibleBottomActions and BOTTOM_ACTION_CHANGE_ORIENTATION != 0)
         binding.bottomActions.bottomChangeOrientation.setOnLongClickListener { toast(R.string.change_orientation); true }
         binding.bottomActions.bottomChangeOrientation.setOnClickListener {
-            mAspectRatioSensorController.cancel()
+            resetGluedMediaTransform()
             requestedOrientation = when (requestedOrientation) {
                 SCREEN_ORIENTATION_PORTRAIT -> SCREEN_ORIENTATION_LANDSCAPE
                 SCREEN_ORIENTATION_LANDSCAPE -> SCREEN_ORIENTATION_REVERSE_LANDSCAPE
@@ -1412,48 +1406,71 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
     @SuppressLint("SourceLockedOrientationActivity")
     private fun checkOrientation() {
-        val rotateByAspectRatio = config.screenRotation == ROTATE_BY_ASPECT_RATIO ||
-            config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
-        if (!mIsOrientationLocked && rotateByAspectRatio) {
-            var flipSides = false
-            try {
-                val pathToLoad = getCurrentPath()
-                val exif = ExifInterface(pathToLoad)
-                val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1)
-                flipSides = orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_ROTATE_270
-            } catch (e: Exception) {
-            }
-            val resolution = applicationContext.getResolution(getCurrentPath()) ?: return
-            val width = if (flipSides) resolution.y else resolution.x
-            val height = if (flipSides) resolution.x else resolution.y
-            val fillOrientation = when {
-                width > height -> SCREEN_ORIENTATION_LANDSCAPE
-                width < height -> SCREEN_ORIENTATION_PORTRAIT
-                else -> null
-            }
-            if (fillOrientation != null) {
-                if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
-                    // Keep the media filling the screen in a fixed orientation, and rotate
-                    // only the overlay controls to follow the device's physical rotation.
-                    mAspectRatioSensorController.fillThenRotateControls(fillOrientation)
+        if (mIsOrientationLocked) {
+            return
+        }
+
+        when (config.screenRotation) {
+            ROTATE_BY_ASPECT_RATIO -> {
+                val fillLandscape = getCurrentMediaFillLandscape() ?: return
+                requestedOrientation = if (fillLandscape) {
+                    SCREEN_ORIENTATION_LANDSCAPE
                 } else {
-                    requestedOrientation = fillOrientation
+                    SCREEN_ORIENTATION_PORTRAIT
                 }
+            }
+
+            ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
+                // Let the whole window (system bars, shade and app controls) rotate freely
+                // with the device, while the media stays glued in its fill orientation.
+                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+                applyGluedMediaTransform()
             }
         }
     }
 
-    private fun collectOverlayControlViews(): List<View> {
-        val views = ArrayList<View>()
-        val toolbar = binding.mediumViewerToolbar
-        for (i in 0 until toolbar.childCount) {
-            views.add(toolbar.getChildAt(i))
+    // Returns true for wide media, false for tall media, null when it cannot be determined.
+    private fun getCurrentMediaFillLandscape(): Boolean? {
+        var flipSides = false
+        try {
+            val exif = ExifInterface(getCurrentPath())
+            val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1)
+            flipSides = orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_ROTATE_270
+        } catch (e: Exception) {
         }
-        val bottomActions = binding.bottomActions.bottomActionsWrapper
-        for (i in 0 until bottomActions.childCount) {
-            views.add(bottomActions.getChildAt(i))
+
+        val resolution = applicationContext.getResolution(getCurrentPath()) ?: return null
+        val width = if (flipSides) resolution.y else resolution.x
+        val height = if (flipSides) resolution.x else resolution.y
+        return when {
+            width > height -> true
+            width < height -> false
+            else -> null
         }
-        return views
+    }
+
+    private fun applyGluedMediaTransform() {
+        val viewPager = binding.viewPager
+        viewPager.post {
+            val fillLandscape = getCurrentMediaFillLandscape()
+            if (config.screenRotation != ROTATE_BY_ASPECT_RATIO_AND_SENSOR ||
+                mIsOrientationLocked ||
+                fillLandscape == null
+            ) {
+                GluedMediaOrientationHelper.reset(viewPager)
+            } else {
+                GluedMediaOrientationHelper.apply(
+                    mediaView = viewPager,
+                    containerWidth = binding.root.width,
+                    containerHeight = binding.root.height,
+                    fillLandscape = fillLandscape,
+                )
+            }
+        }
+    }
+
+    private fun resetGluedMediaTransform() {
+        GluedMediaOrientationHelper.reset(binding.viewPager)
     }
 
     override fun fragmentClicked() {

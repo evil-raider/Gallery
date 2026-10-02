@@ -4,6 +4,7 @@ package org.fossify.gallery.activities
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
@@ -83,6 +84,7 @@ import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
 import org.fossify.gallery.helpers.GO_TO_NEXT_ITEM
 import org.fossify.gallery.helpers.GO_TO_PREV_ITEM
+import org.fossify.gallery.helpers.GluedMediaOrientationHelper
 import org.fossify.gallery.helpers.HIDE_SYSTEM_UI_DELAY
 import org.fossify.gallery.helpers.MAX_CLOSE_DOWN_GESTURE_DURATION
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
@@ -601,13 +603,25 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private fun setVideoSize() {
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = windowManager.defaultDisplay
-        val screenWidth: Int
-        val screenHeight: Int
 
         val realMetrics = DisplayMetrics()
         display.getRealMetrics(realMetrics)
-        screenWidth = realMetrics.widthPixels
-        screenHeight = realMetrics.heightPixels
+        val windowWidth = realMetrics.widthPixels
+        val windowHeight = realMetrics.heightPixels
+
+        val fillLandscape = when {
+            mVideoSize.x > mVideoSize.y -> true
+            mVideoSize.x < mVideoSize.y -> false
+            else -> null
+        }
+
+        // When gluing and the window orientation does not match the video's fill orientation,
+        // lay the surface out against the swapped (fill) dimensions so it fills the glued frame.
+        val glued = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
+        val windowLandscape = windowWidth > windowHeight
+        val swap = glued && fillLandscape != null && windowLandscape != fillLandscape
+        val screenWidth = if (swap) windowHeight else windowWidth
+        val screenHeight = if (swap) windowWidth else windowHeight
 
         val screenProportion = screenWidth.toFloat() / screenHeight.toFloat()
 
@@ -625,22 +639,38 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         val multiplier = if (screenWidth > screenHeight) 0.5 else 0.8
         mScreenWidth = (screenWidth * multiplier).toInt()
 
-        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO ||
-            config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
-        ) {
-            val fillOrientation = when {
-                mVideoSize.x > mVideoSize.y -> SCREEN_ORIENTATION_LANDSCAPE
-                mVideoSize.x < mVideoSize.y -> SCREEN_ORIENTATION_PORTRAIT
-                else -> null
+        when (config.screenRotation) {
+            ROTATE_BY_ASPECT_RATIO -> {
+                if (fillLandscape != null) {
+                    requestedOrientation = if (fillLandscape) {
+                        SCREEN_ORIENTATION_LANDSCAPE
+                    } else {
+                        SCREEN_ORIENTATION_PORTRAIT
+                    }
+                }
             }
-            if (fillOrientation != null) {
-                requestedOrientation = fillOrientation
+
+            ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
+                // Let the whole window rotate freely with the device, while the video
+                // stays glued in its fill orientation.
+                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+                if (glued && fillLandscape != null) {
+                    GluedMediaOrientationHelper.apply(
+                        mediaView = binding.videoSurfaceFrame,
+                        containerWidth = windowWidth,
+                        containerHeight = windowHeight,
+                        fillLandscape = fillLandscape,
+                    )
+                } else {
+                    GluedMediaOrientationHelper.reset(binding.videoSurfaceFrame)
+                }
             }
         }
     }
 
     private fun toggleOrientation(orientation: Int) {
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
+        GluedMediaOrientationHelper.reset(binding.videoSurfaceFrame)
         requestedOrientation = orientation
     }
 
