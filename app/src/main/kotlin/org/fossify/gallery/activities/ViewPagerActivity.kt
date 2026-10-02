@@ -12,6 +12,8 @@ import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -156,6 +158,7 @@ import org.fossify.gallery.helpers.PATH
 import org.fossify.gallery.helpers.PORTRAIT_PATH
 import org.fossify.gallery.helpers.RECYCLE_BIN
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
+import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
 import org.fossify.gallery.helpers.SHOW_ALL
@@ -1397,7 +1400,9 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
     @SuppressLint("SourceLockedOrientationActivity")
     private fun checkOrientation() {
-        if (!mIsOrientationLocked && config.screenRotation == ROTATE_BY_ASPECT_RATIO) {
+        val rotateByAspectRatio = config.screenRotation == ROTATE_BY_ASPECT_RATIO ||
+            config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
+        if (!mIsOrientationLocked && rotateByAspectRatio) {
             var flipSides = false
             try {
                 val pathToLoad = getCurrentPath()
@@ -1409,10 +1414,19 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             val resolution = applicationContext.getResolution(getCurrentPath()) ?: return
             val width = if (flipSides) resolution.y else resolution.x
             val height = if (flipSides) resolution.x else resolution.y
+            val followSensor = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
             if (width > height) {
-                requestedOrientation = SCREEN_ORIENTATION_LANDSCAPE
+                requestedOrientation = if (followSensor) {
+                    SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                } else {
+                    SCREEN_ORIENTATION_LANDSCAPE
+                }
             } else if (width < height) {
-                requestedOrientation = SCREEN_ORIENTATION_PORTRAIT
+                requestedOrientation = if (followSensor) {
+                    SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                } else {
+                    SCREEN_ORIENTATION_PORTRAIT
+                }
             }
         }
     }

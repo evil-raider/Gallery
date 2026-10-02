@@ -8,6 +8,8 @@ import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.res.Configuration
 import android.graphics.Color
@@ -86,6 +88,7 @@ import org.fossify.gallery.helpers.GO_TO_PREV_ITEM
 import org.fossify.gallery.helpers.HIDE_SYSTEM_UI_DELAY
 import org.fossify.gallery.helpers.MAX_CLOSE_DOWN_GESTURE_DURATION
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
+import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
 import org.fossify.gallery.helpers.SHOW_NEXT_ITEM
@@ -624,11 +627,22 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         val multiplier = if (screenWidth > screenHeight) 0.5 else 0.8
         mScreenWidth = (screenWidth * multiplier).toInt()
 
-        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO) {
+        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO ||
+            config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
+        ) {
+            val followSensor = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
             if (mVideoSize.x > mVideoSize.y) {
-                requestedOrientation = SCREEN_ORIENTATION_LANDSCAPE
+                requestedOrientation = if (followSensor) {
+                    SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                } else {
+                    SCREEN_ORIENTATION_LANDSCAPE
+                }
             } else if (mVideoSize.x < mVideoSize.y) {
-                requestedOrientation = SCREEN_ORIENTATION_PORTRAIT
+                requestedOrientation = if (followSensor) {
+                    SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                } else {
+                    SCREEN_ORIENTATION_PORTRAIT
+                }
             }
         }
     }

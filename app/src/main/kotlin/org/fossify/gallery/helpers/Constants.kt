@@ -168,6 +168,7 @@ const val TEMP_FOLDER_NAME = "images"
 const val ROTATE_BY_SYSTEM_SETTING = 0
 const val ROTATE_BY_DEVICE_ROTATION = 1
 const val ROTATE_BY_ASPECT_RATIO = 2
+const val ROTATE_BY_ASPECT_RATIO_AND_SENSOR = 3
 
 // video player type
 const val VIDEO_PLAYER_APP = 0

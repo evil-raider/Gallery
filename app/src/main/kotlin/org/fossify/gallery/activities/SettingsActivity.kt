@@ -662,7 +662,11 @@ class SettingsActivity : SimpleActivity() {
             val items = arrayListOf(
                 RadioItem(ROTATE_BY_SYSTEM_SETTING, getString(R.string.screen_rotation_system_setting)),
                 RadioItem(ROTATE_BY_DEVICE_ROTATION, getString(R.string.screen_rotation_device_rotation)),
-                RadioItem(ROTATE_BY_ASPECT_RATIO, getString(R.string.screen_rotation_aspect_ratio))
+                RadioItem(ROTATE_BY_ASPECT_RATIO, getString(R.string.screen_rotation_aspect_ratio)),
+                RadioItem(
+                    ROTATE_BY_ASPECT_RATIO_AND_SENSOR,
+                    getString(R.string.screen_rotation_aspect_ratio_sensor)
+                )
             )
 
             RadioGroupDialog(this@SettingsActivity, items, config.screenRotation) {
@@ -676,6 +680,7 @@ class SettingsActivity : SimpleActivity() {
         when (config.screenRotation) {
             ROTATE_BY_SYSTEM_SETTING -> R.string.screen_rotation_system_setting
             ROTATE_BY_DEVICE_ROTATION -> R.string.screen_rotation_device_rotation
+            ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> R.string.screen_rotation_aspect_ratio_sensor
             else -> R.string.screen_rotation_aspect_ratio
         }
     )
