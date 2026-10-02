@@ -1,46 +1,52 @@
 package org.fossify.gallery.helpers
 
 import android.app.Activity
-import android.content.pm.ActivityInfo
+import android.os.Build
 import android.view.OrientationEventListener
+import android.view.Surface
+import android.view.View
 
 /**
  * Drives the "Aspect ratio and device rotation" screen-rotation mode.
  *
- * When a medium is shown, the activity is first forced into the orientation that
- * lets the media fill the screen (landscape for wide media, portrait for tall
- * media). As soon as the user physically rotates the device away from the
- * orientation it had when the media was shown, control is handed over to the
- * full device sensor, so the UI can then rotate freely in any direction,
- * independent of the media that originally filled the screen.
+ * The media is kept locked in the orientation that lets it fill the screen
+ * (landscape for wide media, portrait for tall media), exactly like the plain
+ * "Aspect ratio" mode, so the media never rotates and never gets letterboxed.
+ *
+ * On top of that, the provided overlay control views (toolbar items, bottom
+ * action icons, ...) are rotated to follow the device's physical orientation,
+ * so the buttons stay upright for the user regardless of how the phone is held,
+ * while the media that fills the screen stays put.
  */
 class AspectRatioSensorOrientationController(
     private val activity: Activity,
     private val isOrientationLocked: () -> Boolean,
+    private val controlViews: () -> List<View>,
 ) {
     private var orientationListener: OrientationEventListener? = null
-    private var armed = false
-    private var baselineBucket = BUCKET_UNKNOWN
+    private var active = false
+    private var currentControlsRotation = 0
 
     /**
-     * Force [fillOrientation] (one of [ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE]
-     * or [ActivityInfo.SCREEN_ORIENTATION_PORTRAIT]) so the media fills the
-     * screen, then start following the device sensor.
+     * Lock the activity to [fillOrientation] (one of
+     * [android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE] or
+     * [android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT]) so the
+     * media fills the screen, then start rotating the overlay controls to match
+     * the device's physical orientation.
      */
-    fun fillThenFollowSensor(fillOrientation: Int) {
+    fun fillThenRotateControls(fillOrientation: Int) {
         if (isOrientationLocked()) {
             return
         }
 
         activity.requestedOrientation = fillOrientation
-        armed = true
-        baselineBucket = BUCKET_UNKNOWN
+        active = true
         ensureListener()
         enableListener()
     }
 
     fun onResume() {
-        if (armed) {
+        if (active) {
             enableListener()
         }
     }
@@ -52,13 +58,17 @@ class AspectRatioSensorOrientationController(
     fun destroy() {
         orientationListener?.disable()
         orientationListener = null
-        armed = false
+        active = false
     }
 
-    /** Stop handing control to the sensor, e.g. when the user manually locks the orientation. */
+    /** Stop following the sensor and reset the controls, e.g. when the user manually locks the orientation. */
     fun cancel() {
-        armed = false
+        if (!active) {
+            return
+        }
+        active = false
         orientationListener?.disable()
+        resetControls()
     }
 
     private fun enableListener() {
@@ -72,34 +82,64 @@ class AspectRatioSensorOrientationController(
 
         orientationListener = object : OrientationEventListener(activity) {
             override fun onOrientationChanged(angle: Int) {
-                if (!armed || angle == ORIENTATION_UNKNOWN || isOrientationLocked()) {
+                if (!active || angle == ORIENTATION_UNKNOWN || isOrientationLocked()) {
                     return
                 }
 
-                val bucket = angleToBucket(angle)
-                if (baselineBucket == BUCKET_UNKNOWN) {
-                    // Remember how the device was held when the media filled the screen,
-                    // so forcing the fill orientation does not immediately count as a rotation.
-                    baselineBucket = bucket
-                    return
+                val snapped = ((angle + 45) / 90 * 90) % 360
+                // The activity is locked, so the UI is rendered rotated by this amount
+                // relative to the device's natural orientation.
+                val displayDegrees = currentDisplayRotationDegrees()
+                // Rotation that makes the controls appear upright for the user.
+                // CONTROLS_ROTATION_SIGN flips the direction if it ever comes out mirrored on a device.
+                var target = (CONTROLS_ROTATION_SIGN * (displayDegrees - snapped)) % 360
+                if (target < 0) {
+                    target += 360
+                }
+                if (target > 180) {
+                    target -= 360
                 }
 
-                if (bucket != baselineBucket) {
-                    armed = false
-                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                if (target != currentControlsRotation) {
+                    currentControlsRotation = target
+                    applyControlsRotation(target.toFloat())
                 }
             }
         }
     }
 
-    private fun angleToBucket(angle: Int): Int = when {
-        angle >= 315 || angle < 45 -> 0
-        angle < 135 -> 1
-        angle < 225 -> 2
-        else -> 3
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotationDegrees(): Int {
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            activity.display?.rotation
+        } else {
+            activity.windowManager.defaultDisplay.rotation
+        }
+        return when (rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
+    private fun applyControlsRotation(degrees: Float) {
+        controlViews().forEach { view ->
+            view.animate().rotation(degrees).setDuration(ROTATION_ANIM_MS).start()
+        }
+    }
+
+    private fun resetControls() {
+        currentControlsRotation = 0
+        controlViews().forEach { view ->
+            view.animate().rotation(0f).setDuration(ROTATION_ANIM_MS).start()
+        }
     }
 
     companion object {
-        private const val BUCKET_UNKNOWN = -1
+        private const val ROTATION_ANIM_MS = 200L
+
+        // Set to -1 if, on a real device, the controls rotate the wrong way.
+        private const val CONTROLS_ROTATION_SIGN = 1
     }
 }

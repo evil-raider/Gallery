@@ -210,7 +210,11 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private var mIsOrientationLocked = false
 
     private val mAspectRatioSensorController by lazy {
-        AspectRatioSensorOrientationController(this) { mIsOrientationLocked }
+        AspectRatioSensorOrientationController(
+            activity = this,
+            isOrientationLocked = { mIsOrientationLocked },
+            controlViews = { collectOverlayControlViews() },
+        )
     }
 
     private var mMediaFiles = ArrayList<Medium>()
@@ -1429,14 +1433,27 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             }
             if (fillOrientation != null) {
                 if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
-                    // Fill the screen by aspect ratio first, then let the device sensor
-                    // rotate the UI freely once the user physically turns the device.
-                    mAspectRatioSensorController.fillThenFollowSensor(fillOrientation)
+                    // Keep the media filling the screen in a fixed orientation, and rotate
+                    // only the overlay controls to follow the device's physical rotation.
+                    mAspectRatioSensorController.fillThenRotateControls(fillOrientation)
                 } else {
                     requestedOrientation = fillOrientation
                 }
             }
         }
+    }
+
+    private fun collectOverlayControlViews(): List<View> {
+        val views = ArrayList<View>()
+        val toolbar = binding.mediumViewerToolbar
+        for (i in 0 until toolbar.childCount) {
+            views.add(toolbar.getChildAt(i))
+        }
+        val bottomActions = binding.bottomActions.bottomActionsWrapper
+        for (i in 0 until bottomActions.childCount) {
+            views.add(bottomActions.getChildAt(i))
+        }
+        return views
     }
 
     override fun fragmentClicked() {
