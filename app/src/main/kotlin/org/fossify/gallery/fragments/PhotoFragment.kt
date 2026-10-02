@@ -114,6 +114,10 @@ class PhotoFragment : ViewPagerFragment() {
     )
 
     var mCurrentRotationDegrees = 0
+
+    // Extra rotation applied on top of the user rotation to keep the image glued and filling
+    // the screen in the "aspect ratio + device rotation" mode, where the window rotates freely.
+    private var mFillRotationDegrees = 0
     private var mIsFragmentVisible = false
     private var mIsFullscreen = false
     private var mWasInit = false
@@ -512,8 +516,9 @@ class PhotoFragment : ViewPagerFragment() {
             .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
             .fitCenter()
             .run {
-                if (mCurrentRotationDegrees != 0) {
-                    transform(Rotate(mCurrentRotationDegrees))
+                val totalRotation = normalizeRotation(mCurrentRotationDegrees + mFillRotationDegrees)
+                if (totalRotation != 0) {
+                    transform(Rotate(totalRotation))
                         .diskCacheStrategy(DiskCacheStrategy.NONE)
                 } else {
                     this
@@ -561,8 +566,9 @@ class PhotoFragment : ViewPagerFragment() {
                 .stableKey(mMedium.getSignature())
                 .resize(mScreenWidth, mScreenHeight)
 
-            if (mCurrentRotationDegrees != 0) {
-                picasso.rotate(mCurrentRotationDegrees.toFloat())
+            val totalRotation = normalizeRotation(mCurrentRotationDegrees + mFillRotationDegrees)
+            if (totalRotation != 0) {
+                picasso.rotate(totalRotation.toFloat())
             } else {
                 degreesForRotation(mImageOrientation).toFloat()
             }
@@ -753,7 +759,7 @@ class PhotoFragment : ViewPagerFragment() {
             override fun make() = PicassoRegionDecoder(showHighestQuality, mScreenWidth, mScreenHeight, minTileDpi)
         }
 
-        var newOrientation = (rotation + mCurrentRotationDegrees) % 360
+        var newOrientation = (rotation + mCurrentRotationDegrees + mFillRotationDegrees) % 360
         if (newOrientation < 0) {
             newOrientation += 360
         }
@@ -901,6 +907,36 @@ class PhotoFragment : ViewPagerFragment() {
         }
     }
 
+    private fun normalizeRotation(degrees: Int): Int {
+        var normalized = degrees % 360
+        if (normalized < 0) {
+            normalized += 360
+        }
+        return normalized
+    }
+
+    // Called by the viewer in the "aspect ratio + device rotation" mode. It rotates only the
+    // displayed image content (not the view container), so swiping and zooming keep working,
+    // while the picture stays glued in the orientation that fills the screen.
+    fun setFillRotation(degrees: Int) {
+        val normalized = normalizeRotation(degrees)
+        if (mFillRotationDegrees == normalized) {
+            return
+        }
+
+        mFillRotationDegrees = normalized
+        if (!mWasInit) {
+            return
+        }
+
+        if (mIsSubsamplingVisible) {
+            val baseRotation = degreesForRotation(mImageOrientation)
+            binding.subsamplingView.orientation = normalizeRotation(baseRotation + mCurrentRotationDegrees + mFillRotationDegrees)
+        } else {
+            loadBitmap()
+        }
+    }
+
     fun rotateImageViewBy(degrees: Int) {
         if (mIsSubsamplingVisible) {
             binding.subsamplingView.rotateBy(degrees)
@@ -973,6 +1009,38 @@ class PhotoFragment : ViewPagerFragment() {
 
             if (mWasInit && mMedium.isPortrait()) {
                 photoPortraitStripeWrapper.animate().alpha(if (isFullscreen) 0f else 1f).start()
+            }
+        }
+    }
+
+    private fun applyProperColorMode(resource: Drawable?) {
+        if (mIsFragmentVisible && activity != null) {
+            ColorModeHelper.setColorModeForImage(
+                activity = requireActivity(),
+                bitmap = (resource as? BitmapDrawable)?.bitmap ?: resource?.toBitmapOrNull(),
+                ultraHdr = context?.config?.ultraHdrRendering ?: true
+            )
+        }
+    }
+
+    private fun resetColorModeIfVisible() {
+        if (mIsFragmentVisible) {
+            ColorModeHelper.resetColorMode(activity)
+        }
+    }
+
+    private fun reapplyColorModeIfNeeded() {
+        if (mWasInit && mIsFragmentVisible) {
+            val drawable = binding.gesturesView.drawable
+            if (drawable != null && binding.gesturesView.isVisible()) {
+                applyProperColorMode(drawable)
+            } else {
+                resetColorModeIfVisible()
+            }
+        }
+    }
+}
+apper.animate().alpha(if (isFullscreen) 0f else 1f).start()
             }
         }
     }

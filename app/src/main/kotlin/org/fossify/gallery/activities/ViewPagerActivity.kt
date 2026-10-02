@@ -156,7 +156,6 @@ import org.fossify.gallery.helpers.MAX_PRINT_SIDE_SIZE
 import org.fossify.gallery.helpers.PATH
 import org.fossify.gallery.helpers.PORTRAIT_PATH
 import org.fossify.gallery.helpers.RECYCLE_BIN
-import org.fossify.gallery.helpers.GluedMediaOrientationHelper
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
@@ -409,9 +408,10 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         initBottomActionsLayout()
+        // The window just rotated with the device; in the aspect-ratio + sensor mode the
+        // whole UI rotates, so re-apply the counter-rotation that keeps the media glued.
         if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
-            // The window just rotated; re-glue the media so it keeps filling the screen.
-            applyGluedMediaTransform()
+            applyFillRotation(newConfig.orientation)
         }
     }
 
@@ -842,7 +842,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     private fun toggleOrientation(orientation: Int) {
-        resetGluedMediaTransform()
+        resetFillRotation()
         requestedOrientation = orientation
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         refreshMenuItems()
@@ -993,7 +993,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         binding.bottomActions.bottomChangeOrientation.beVisibleIf(visibleBottomActions and BOTTOM_ACTION_CHANGE_ORIENTATION != 0)
         binding.bottomActions.bottomChangeOrientation.setOnLongClickListener { toast(R.string.change_orientation); true }
         binding.bottomActions.bottomChangeOrientation.setOnClickListener {
-            resetGluedMediaTransform()
+            resetFillRotation()
             requestedOrientation = when (requestedOrientation) {
                 SCREEN_ORIENTATION_PORTRAIT -> SCREEN_ORIENTATION_LANDSCAPE
                 SCREEN_ORIENTATION_LANDSCAPE -> SCREEN_ORIENTATION_REVERSE_LANDSCAPE
@@ -1421,15 +1421,16 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             }
 
             ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
-                // Let the whole window (system bars, shade and app controls) rotate freely
-                // with the device, while the media stays glued in its fill orientation.
+                // Let the whole window (status bar, notification shade and all app controls)
+                // rotate freely with the device, and counter-rotate only the media content so
+                // it stays glued in the orientation that fills the screen.
                 requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
-                applyGluedMediaTransform()
+                applyFillRotation(resources.configuration.orientation)
             }
         }
     }
 
-    // Returns true for wide media, false for tall media, null when it cannot be determined.
+    // true for wide media, false for tall media, null when it cannot be determined.
     private fun getCurrentMediaFillLandscape(): Boolean? {
         var flipSides = false
         try {
@@ -1449,28 +1450,33 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         }
     }
 
-    private fun applyGluedMediaTransform() {
-        val viewPager = binding.viewPager
-        viewPager.post {
-            val fillLandscape = getCurrentMediaFillLandscape()
-            if (config.screenRotation != ROTATE_BY_ASPECT_RATIO_AND_SENSOR ||
-                mIsOrientationLocked ||
-                fillLandscape == null
-            ) {
-                GluedMediaOrientationHelper.reset(viewPager)
-            } else {
-                GluedMediaOrientationHelper.apply(
-                    mediaView = viewPager,
-                    containerWidth = binding.root.width,
-                    containerHeight = binding.root.height,
-                    fillLandscape = fillLandscape,
-                )
-            }
+    // In the aspect-ratio + sensor mode the window rotates with the device, so rotate the
+    // media content by 90° whenever the window orientation does not match the media's fill
+    // orientation. This keeps the photo/video filling the screen and visually "glued" while
+    // the system bars and controls rotate normally.
+    private fun applyFillRotation(windowOrientation: Int) {
+        if (config.screenRotation != ROTATE_BY_ASPECT_RATIO_AND_SENSOR || mIsOrientationLocked) {
+            resetFillRotation()
+            return
         }
+
+        val fillLandscape = getCurrentMediaFillLandscape()
+        if (fillLandscape == null) {
+            resetFillRotation()
+            return
+        }
+
+        val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
+        val fillRotation = if (windowLandscape == fillLandscape) 0 else 90
+        val fragment = getCurrentFragment()
+        (fragment as? PhotoFragment)?.setFillRotation(fillRotation)
+        (fragment as? VideoFragment)?.setFillRotation(fillRotation)
     }
 
-    private fun resetGluedMediaTransform() {
-        GluedMediaOrientationHelper.reset(binding.viewPager)
+    private fun resetFillRotation() {
+        val fragment = getCurrentFragment()
+        (fragment as? PhotoFragment)?.setFillRotation(0)
+        (fragment as? VideoFragment)?.setFillRotation(0)
     }
 
     override fun fragmentClicked() {

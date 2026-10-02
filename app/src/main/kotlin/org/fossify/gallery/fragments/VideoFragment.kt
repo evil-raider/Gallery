@@ -120,6 +120,10 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
 
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(1, 1)
+
+    // Extra rotation of the video content for the "aspect ratio + device rotation" mode, where
+    // the window rotates freely and the video stays glued in the orientation that fills the screen.
+    private var mFillRotationDegrees = 0
     private var mTimerHandler = Handler()
 
     private var mStoredShowExtendedDetails = false
@@ -958,25 +962,51 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
 
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = requireActivity().windowManager.defaultDisplay
-        val screenWidth: Int
-        val screenHeight: Int
-
         val realMetrics = DisplayMetrics()
         display.getRealMetrics(realMetrics)
-        screenWidth = realMetrics.widthPixels
-        screenHeight = realMetrics.heightPixels
+        val screenWidth = realMetrics.widthPixels
+        val screenHeight = realMetrics.heightPixels
 
-        val screenProportion = screenWidth.toFloat() / screenHeight.toFloat()
+        // When the content is counter-rotated by 90° to stay glued, fit it against the swapped
+        // screen box so that after the rotation it fills the real screen.
+        val rotated = mFillRotationDegrees == 90 || mFillRotationDegrees == 270
+        val boxWidth = if (rotated) screenHeight else screenWidth
+        val boxHeight = if (rotated) screenWidth else screenHeight
+        val boxProportion = boxWidth.toFloat() / boxHeight.toFloat()
 
         mTextureView.layoutParams.apply {
-            if (videoProportion > screenProportion) {
-                width = screenWidth
-                height = (screenWidth.toFloat() / videoProportion).toInt()
+            if (videoProportion > boxProportion) {
+                width = boxWidth
+                height = (boxWidth.toFloat() / videoProportion).toInt()
             } else {
-                width = (videoProportion * screenHeight.toFloat()).toInt()
-                height = screenHeight
+                width = (videoProportion * boxHeight.toFloat()).toInt()
+                height = boxHeight
             }
             mTextureView.layoutParams = this
+        }
+        mTextureView.rotation = mFillRotationDegrees.toFloat()
+    }
+
+    // Called by the viewer in the "aspect ratio + device rotation" mode to keep the video glued
+    // and filling the screen while the window rotates with the device.
+    fun setFillRotation(degrees: Int) {
+        var normalized = degrees % 360
+        if (normalized < 0) {
+            normalized += 360
+        }
+        if (mFillRotationDegrees == normalized) {
+            return
+        }
+
+        mFillRotationDegrees = normalized
+        if (!mWasFragmentInit) {
+            return
+        }
+
+        setVideoSize()
+        binding.videoSurfaceFrame.onGlobalLayout {
+            binding.videoSurfaceFrame.controller.resetState()
+            mTextureView.rotation = mFillRotationDegrees.toFloat()
         }
     }
 
