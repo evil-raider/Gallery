@@ -12,8 +12,6 @@ import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -157,6 +155,7 @@ import org.fossify.gallery.helpers.MAX_PRINT_SIDE_SIZE
 import org.fossify.gallery.helpers.PATH
 import org.fossify.gallery.helpers.PORTRAIT_PATH
 import org.fossify.gallery.helpers.RECYCLE_BIN
+import org.fossify.gallery.helpers.AspectRatioSensorOrientationController
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
@@ -210,6 +209,10 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
     private var mIsOrientationLocked = false
 
+    private val mAspectRatioSensorController by lazy {
+        AspectRatioSensorOrientationController(this) { mIsOrientationLocked }
+    }
+
     private var mMediaFiles = ArrayList<Medium>()
     private var mFavoritePaths = ArrayList<String>()
     private var mIgnoredPaths = ArrayList<String>()
@@ -255,6 +258,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         initBottomActions()
         mOriginalBrightness = window.updateBrightness(config.maxBrightness, mOriginalBrightness)
         setupOrientation()
+        mAspectRatioSensorController.onResume()
         refreshMenuItems()
 
         val filename = getCurrentMedium()?.name ?: mPath.getFilenameFromPath()
@@ -264,11 +268,13 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onPause() {
         super.onPause()
         stopSlideshow()
+        mAspectRatioSensorController.onPause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         ColorModeHelper.resetColorMode(this)
+        mAspectRatioSensorController.destroy()
 
         if (intent.extras?.containsKey(IS_VIEW_INTENT) == true) {
             config.temporarilyShowHidden = false
@@ -838,6 +844,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     private fun toggleOrientation(orientation: Int) {
+        mAspectRatioSensorController.cancel()
         requestedOrientation = orientation
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         refreshMenuItems()
@@ -988,6 +995,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         binding.bottomActions.bottomChangeOrientation.beVisibleIf(visibleBottomActions and BOTTOM_ACTION_CHANGE_ORIENTATION != 0)
         binding.bottomActions.bottomChangeOrientation.setOnLongClickListener { toast(R.string.change_orientation); true }
         binding.bottomActions.bottomChangeOrientation.setOnClickListener {
+            mAspectRatioSensorController.cancel()
             requestedOrientation = when (requestedOrientation) {
                 SCREEN_ORIENTATION_PORTRAIT -> SCREEN_ORIENTATION_LANDSCAPE
                 SCREEN_ORIENTATION_LANDSCAPE -> SCREEN_ORIENTATION_REVERSE_LANDSCAPE
@@ -1414,18 +1422,18 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             val resolution = applicationContext.getResolution(getCurrentPath()) ?: return
             val width = if (flipSides) resolution.y else resolution.x
             val height = if (flipSides) resolution.x else resolution.y
-            val followSensor = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
-            if (width > height) {
-                requestedOrientation = if (followSensor) {
-                    SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            val fillOrientation = when {
+                width > height -> SCREEN_ORIENTATION_LANDSCAPE
+                width < height -> SCREEN_ORIENTATION_PORTRAIT
+                else -> null
+            }
+            if (fillOrientation != null) {
+                if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
+                    // Fill the screen by aspect ratio first, then let the device sensor
+                    // rotate the UI freely once the user physically turns the device.
+                    mAspectRatioSensorController.fillThenFollowSensor(fillOrientation)
                 } else {
-                    SCREEN_ORIENTATION_LANDSCAPE
-                }
-            } else if (width < height) {
-                requestedOrientation = if (followSensor) {
-                    SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                } else {
-                    SCREEN_ORIENTATION_PORTRAIT
+                    requestedOrientation = fillOrientation
                 }
             }
         }

@@ -8,8 +8,6 @@ import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.res.Configuration
 import android.graphics.Color
@@ -87,6 +85,7 @@ import org.fossify.gallery.helpers.GO_TO_NEXT_ITEM
 import org.fossify.gallery.helpers.GO_TO_PREV_ITEM
 import org.fossify.gallery.helpers.HIDE_SYSTEM_UI_DELAY
 import org.fossify.gallery.helpers.MAX_CLOSE_DOWN_GESTURE_DURATION
+import org.fossify.gallery.helpers.AspectRatioSensorOrientationController
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
@@ -113,6 +112,9 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private var mWasVideoStarted = false
     private var mIsDragged = false
     private var mIsOrientationLocked = false
+    private val mAspectRatioSensorController by lazy {
+        AspectRatioSensorOrientationController(this) { mIsOrientationLocked }
+    }
     private var mHasAudio = true
     private var mScreenWidth = 0
     private var mCurrTime = 0L
@@ -181,11 +183,13 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
 
         mOriginalBrightness = window.updateBrightness(config.maxBrightness, mOriginalBrightness)
         updateTextColors(binding.videoPlayerHolder)
+        mAspectRatioSensorController.onResume()
     }
 
     override fun onPause() {
         super.onPause()
         pauseVideo()
+        mAspectRatioSensorController.onPause()
 
         if (config.rememberLastVideoPosition && mWasVideoStarted) {
             saveVideoProgress()
@@ -194,6 +198,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
 
     override fun onDestroy() {
         super.onDestroy()
+        mAspectRatioSensorController.destroy()
         if (!isChangingConfigurations) {
             pauseVideo()
             binding.bottomVideoTimeHolder.videoCurrTime.text = 0.getFormattedDuration()
@@ -630,24 +635,25 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         if (config.screenRotation == ROTATE_BY_ASPECT_RATIO ||
             config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
         ) {
-            val followSensor = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR
-            if (mVideoSize.x > mVideoSize.y) {
-                requestedOrientation = if (followSensor) {
-                    SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            val fillOrientation = when {
+                mVideoSize.x > mVideoSize.y -> SCREEN_ORIENTATION_LANDSCAPE
+                mVideoSize.x < mVideoSize.y -> SCREEN_ORIENTATION_PORTRAIT
+                else -> null
+            }
+            if (fillOrientation != null) {
+                if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
+                    // Fill the screen by aspect ratio first, then let the device sensor
+                    // rotate the UI freely once the user physically turns the device.
+                    mAspectRatioSensorController.fillThenFollowSensor(fillOrientation)
                 } else {
-                    SCREEN_ORIENTATION_LANDSCAPE
-                }
-            } else if (mVideoSize.x < mVideoSize.y) {
-                requestedOrientation = if (followSensor) {
-                    SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                } else {
-                    SCREEN_ORIENTATION_PORTRAIT
+                    requestedOrientation = fillOrientation
                 }
             }
         }
     }
 
     private fun toggleOrientation(orientation: Int) {
+        mAspectRatioSensorController.cancel()
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         requestedOrientation = orientation
     }
