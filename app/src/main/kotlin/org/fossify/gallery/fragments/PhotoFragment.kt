@@ -1040,35 +1040,3 @@ class PhotoFragment : ViewPagerFragment() {
         }
     }
 }
-apper.animate().alpha(if (isFullscreen) 0f else 1f).start()
-            }
-        }
-    }
-
-    private fun applyProperColorMode(resource: Drawable?) {
-        if (mIsFragmentVisible && activity != null) {
-            ColorModeHelper.setColorModeForImage(
-                activity = requireActivity(),
-                bitmap = (resource as? BitmapDrawable)?.bitmap ?: resource?.toBitmapOrNull(),
-                ultraHdr = context?.config?.ultraHdrRendering ?: true
-            )
-        }
-    }
-
-    private fun resetColorModeIfVisible() {
-        if (mIsFragmentVisible) {
-            ColorModeHelper.resetColorMode(activity)
-        }
-    }
-
-    private fun reapplyColorModeIfNeeded() {
-        if (mWasInit && mIsFragmentVisible) {
-            val drawable = binding.gesturesView.drawable
-            if (drawable != null && binding.gesturesView.isVisible()) {
-                applyProperColorMode(drawable)
-            } else {
-                resetColorModeIfVisible()
-            }
-        }
-    }
-}
