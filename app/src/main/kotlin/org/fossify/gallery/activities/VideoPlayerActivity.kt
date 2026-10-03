@@ -4,11 +4,12 @@ package org.fossify.gallery.activities
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.res.Configuration
 import android.graphics.Color
@@ -112,9 +113,6 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private var mWasVideoStarted = false
     private var mIsDragged = false
     private var mIsOrientationLocked = false
-
-    // Current counter-rotation of the video content for the aspect ratio + device rotation mode.
-    private var mVideoFillRotation = 0
     private var mHasAudio = true
     private var mScreenWidth = 0
     private var mCurrTime = 0L
@@ -244,7 +242,6 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         initTimeHolder()
         binding.videoSurfaceFrame.onGlobalLayout {
             binding.videoSurfaceFrame.controller.resetState()
-            binding.videoSurface.rotation = mVideoFillRotation.toFloat()
         }
     }
 
@@ -606,60 +603,55 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private fun setVideoSize() {
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = windowManager.defaultDisplay
+        val screenWidth: Int
+        val screenHeight: Int
+
         val realMetrics = DisplayMetrics()
         display.getRealMetrics(realMetrics)
-        val screenWidth = realMetrics.widthPixels
-        val screenHeight = realMetrics.heightPixels
+        screenWidth = realMetrics.widthPixels
+        screenHeight = realMetrics.heightPixels
 
-        val fillLandscape = when {
-            mVideoSize.x > mVideoSize.y -> true
-            mVideoSize.x < mVideoSize.y -> false
-            else -> null
-        }
-
-        // In the aspect ratio + device rotation mode the whole window rotates with the device,
-        // so counter-rotate the video content to keep it glued and filling the screen.
-        var fillRotation = 0
-        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked && fillLandscape != null) {
-            val windowLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            fillRotation = if (windowLandscape == fillLandscape) 0 else 90
-        }
-        mVideoFillRotation = fillRotation
-
-        val rotated = fillRotation == 90 || fillRotation == 270
-        val boxWidth = if (rotated) screenHeight else screenWidth
-        val boxHeight = if (rotated) screenWidth else screenHeight
-        val boxProportion = boxWidth.toFloat() / boxHeight.toFloat()
+        val screenProportion = screenWidth.toFloat() / screenHeight.toFloat()
 
         binding.videoSurface.layoutParams.apply {
-            if (videoProportion > boxProportion) {
-                width = boxWidth
-                height = (boxWidth.toFloat() / videoProportion).toInt()
+            if (videoProportion > screenProportion) {
+                width = screenWidth
+                height = (screenWidth.toFloat() / videoProportion).toInt()
             } else {
-                width = (videoProportion * boxHeight.toFloat()).toInt()
-                height = boxHeight
+                width = (videoProportion * screenHeight.toFloat()).toInt()
+                height = screenHeight
             }
             binding.videoSurface.layoutParams = this
         }
-        binding.videoSurface.rotation = fillRotation.toFloat()
 
         val multiplier = if (screenWidth > screenHeight) 0.5 else 0.8
         mScreenWidth = (screenWidth * multiplier).toInt()
 
         if (!mIsOrientationLocked) {
-            when (config.screenRotation) {
-                ROTATE_BY_ASPECT_RATIO -> {
-                    if (fillLandscape != null) {
+            val fillLandscape = when {
+                mVideoSize.x > mVideoSize.y -> true
+                mVideoSize.x < mVideoSize.y -> false
+                else -> null
+            }
+            if (fillLandscape != null) {
+                when (config.screenRotation) {
+                    ROTATE_BY_ASPECT_RATIO -> {
                         requestedOrientation = if (fillLandscape) {
                             SCREEN_ORIENTATION_LANDSCAPE
                         } else {
                             SCREEN_ORIENTATION_PORTRAIT
                         }
                     }
-                }
 
-                ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
-                    requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+                    ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
+                        // Keep the video filling the screen while still letting the window follow
+                        // the sensor between the two orientations that preserve that fill.
+                        requestedOrientation = if (fillLandscape) {
+                            SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        } else {
+                            SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                        }
+                    }
                 }
             }
         }
@@ -668,9 +660,6 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private fun toggleOrientation(orientation: Int) {
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         requestedOrientation = orientation
-        mVideoFillRotation = 0
-        binding.videoSurface.rotation = 0f
-        setVideoSize()
     }
 
     private fun toggleFullscreen() {

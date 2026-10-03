@@ -13,6 +13,8 @@ import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -1421,11 +1423,22 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             }
 
             ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
-                // Let the whole window (status bar, notification shade and all app controls)
-                // rotate freely with the device, and counter-rotate only the media content so
-                // it stays glued in the orientation that fills the screen.
-                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
-                applyFillRotation(resources.configuration.orientation)
+                when (val fragment = getCurrentFragment()) {
+                    is VideoFragment -> {
+                        // Video content cannot be reliably counter-rotated inside the gesture
+                        // surface, so keep it always filling by locking the window to the sensor
+                        // orientations that preserve the video's fill orientation.
+                        lockVideoOrientation(fragment.getFillLandscape())
+                    }
+
+                    else -> {
+                        // Let the whole window (status bar, notification shade and all app
+                        // controls) rotate freely with the device, and counter-rotate only the
+                        // photo content so it stays glued in the orientation that fills the screen.
+                        requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+                        applyFillRotation(resources.configuration.orientation)
+                    }
+                }
             }
         }
     }
@@ -1451,31 +1464,46 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     // In the aspect-ratio + sensor mode the window rotates with the device, so rotate the
-    // media content by 90° whenever the window orientation does not match the media's fill
-    // orientation. This keeps the photo/video filling the screen and visually "glued" while
-    // the system bars and controls rotate normally.
+    // photo content by 90° whenever the window orientation does not match the photo's fill
+    // orientation. This keeps the photo filling the screen and visually "glued" while the
+    // system bars and controls rotate normally.
     private fun applyFillRotation(windowOrientation: Int) {
         val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
         val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
-        when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> {
-                val fillLandscape = getCurrentMediaFillLandscape()
-                val fillRotation = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
-                fragment.setFillRotation(fillRotation)
-            }
-
-            is VideoFragment -> {
-                // The video fragment computes its own fill orientation from the real video size,
-                // so a vertical video that already fills a portrait screen is never rotated.
-                fragment.updateFillRotation(enabled, windowLandscape)
-            }
+        val fragment = getCurrentFragment()
+        if (fragment is PhotoFragment) {
+            val fillLandscape = getCurrentMediaFillLandscape()
+            val fillRotation = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
+            fragment.setFillRotation(fillRotation)
         }
     }
 
+    // Lock the window to the sensor orientation that keeps the current video filling the screen.
+    @SuppressLint("SourceLockedOrientationActivity")
+    private fun lockVideoOrientation(fillLandscape: Boolean?) {
+        requestedOrientation = when (fillLandscape) {
+            true -> SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            false -> SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            null -> SCREEN_ORIENTATION_FULL_SENSOR
+        }
+    }
+
+    // Called by the video fragment once it knows the real video size, so the window can lock to
+    // the orientation that keeps the video filling the screen in the aspect-ratio + sensor mode.
+    fun updateVideoFillOrientation(fragment: VideoFragment, fillLandscape: Boolean?) {
+        if (config.screenRotation != ROTATE_BY_ASPECT_RATIO_AND_SENSOR || mIsOrientationLocked) {
+            return
+        }
+        if (getCurrentFragment() !== fragment) {
+            return
+        }
+        lockVideoOrientation(fillLandscape)
+    }
+
     private fun resetFillRotation() {
-        when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> fragment.setFillRotation(0)
-            is VideoFragment -> fragment.updateFillRotation(false, false)
+        val fragment = getCurrentFragment()
+        if (fragment is PhotoFragment) {
+            fragment.setFillRotation(0)
         }
     }
 

@@ -70,6 +70,7 @@ import org.fossify.commons.helpers.ensureBackgroundThread
 import org.fossify.gallery.R
 import org.fossify.gallery.activities.BaseViewerActivity
 import org.fossify.gallery.activities.VideoActivity
+import org.fossify.gallery.activities.ViewPagerActivity
 import org.fossify.gallery.databinding.PagerVideoItemBinding
 import org.fossify.gallery.extensions.config
 import org.fossify.gallery.extensions.getActionBarHeight
@@ -120,11 +121,6 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
 
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(1, 1)
-
-    // State for the "aspect ratio + device rotation" mode, where the window rotates freely and
-    // the video stays glued in the orientation that fills the screen.
-    private var mFillRotationEnabled = false
-    private var mWindowLandscape = false
     private var mTimerHandler = Handler()
 
     private var mStoredShowExtendedDetails = false
@@ -415,11 +411,9 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        mWindowLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         setVideoSize()
         binding.videoSurfaceFrame.onGlobalLayout {
             binding.videoSurfaceFrame.controller.resetState()
-            mTextureView.rotation = currentFillRotation().toFloat()
         }
     }
 
@@ -572,6 +566,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
                 mVideoSize.x = videoSize.width
                 mVideoSize.y = (videoSize.height / videoSize.pixelWidthHeightRatio).toInt()
                 setVideoSize()
+                notifyFillOrientation()
             }
 
             override fun onPlayerErrorChanged(error: PlaybackException?) {
@@ -960,65 +955,45 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         mExoPlayer?.setVideoSurface(Surface(mTextureView.surfaceTexture))
     }
 
-    // Counter-rotation needed to keep the video glued and filling the screen. Computed from the
-    // real video size, so a vertical video that already fills a portrait screen is never rotated.
-    private fun currentFillRotation(): Int {
-        if (!mFillRotationEnabled) {
-            return 0
-        }
-        val fillLandscape = when {
-            mVideoSize.x > mVideoSize.y -> true
-            mVideoSize.x < mVideoSize.y -> false
-            else -> return 0
-        }
-        return if (mWindowLandscape == fillLandscape) 0 else 90
-    }
-
     private fun setVideoSize() {
         if (activity == null || mConfig.gestureVideoPlayer) return
 
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = requireActivity().windowManager.defaultDisplay
+        val screenWidth: Int
+        val screenHeight: Int
+
         val realMetrics = DisplayMetrics()
         display.getRealMetrics(realMetrics)
-        val screenWidth = realMetrics.widthPixels
-        val screenHeight = realMetrics.heightPixels
+        screenWidth = realMetrics.widthPixels
+        screenHeight = realMetrics.heightPixels
 
-        // When the content is counter-rotated by 90° to stay glued, fit it against the swapped
-        // screen box so that after the rotation it fills the real screen.
-        val fillRotation = currentFillRotation()
-        val rotated = fillRotation == 90 || fillRotation == 270
-        val boxWidth = if (rotated) screenHeight else screenWidth
-        val boxHeight = if (rotated) screenWidth else screenHeight
-        val boxProportion = boxWidth.toFloat() / boxHeight.toFloat()
+        val screenProportion = screenWidth.toFloat() / screenHeight.toFloat()
 
         mTextureView.layoutParams.apply {
-            if (videoProportion > boxProportion) {
-                width = boxWidth
-                height = (boxWidth.toFloat() / videoProportion).toInt()
+            if (videoProportion > screenProportion) {
+                width = screenWidth
+                height = (screenWidth.toFloat() / videoProportion).toInt()
             } else {
-                width = (videoProportion * boxHeight.toFloat()).toInt()
-                height = boxHeight
+                width = (videoProportion * screenHeight.toFloat()).toInt()
+                height = screenHeight
             }
             mTextureView.layoutParams = this
         }
-        mTextureView.rotation = fillRotation.toFloat()
     }
 
-    // Called by the viewer in the "aspect ratio + device rotation" mode. The fragment decides the
-    // counter-rotation itself from the real video size and the current window orientation.
-    fun updateFillRotation(enabled: Boolean, windowLandscape: Boolean) {
-        mFillRotationEnabled = enabled
-        mWindowLandscape = windowLandscape
-        if (!mWasFragmentInit) {
-            return
-        }
+    // Fill orientation computed from the real (display) video size: true when it best fills a
+    // landscape screen, false for portrait, null when the size is not known yet.
+    fun getFillLandscape(): Boolean? = when {
+        mVideoSize.x > mVideoSize.y -> true
+        mVideoSize.x < mVideoSize.y -> false
+        else -> null
+    }
 
-        setVideoSize()
-        binding.videoSurfaceFrame.onGlobalLayout {
-            binding.videoSurfaceFrame.controller.resetState()
-            mTextureView.rotation = currentFillRotation().toFloat()
-        }
+    // In the aspect-ratio + sensor mode the viewer locks the window to the orientation that keeps
+    // the video filling the screen, so report the fill orientation once the real size is known.
+    private fun notifyFillOrientation() {
+        (activity as? ViewPagerActivity)?.updateVideoFillOrientation(this, getFillLandscape())
     }
 
     private fun handleTouchHoldEvent(event: MotionEvent) {
