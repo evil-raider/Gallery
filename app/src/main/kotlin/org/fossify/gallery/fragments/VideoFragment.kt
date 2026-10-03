@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Point
 import android.graphics.SurfaceTexture
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -293,9 +294,18 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         // checkIfPanorama() TODO: Implement panorama using a FOSS library
 
         ensureBackgroundThread {
-            activity.getVideoResolution(mMedium.path)?.apply {
-                mVideoSize.x = x
-                mVideoSize.y = y
+            val resolution = activity.getVideoResolution(mMedium.path)
+            if (resolution != null) {
+                // getVideoResolution returns the coded (unrotated) size, so apply the file's
+                // rotation metadata to get the real display size. Otherwise a portrait video
+                // stored as landscape + 90° rotation is mistaken for a landscape video.
+                val swap = getVideoRotation() % 180 != 0
+                mVideoSize.x = if (swap) resolution.y else resolution.x
+                mVideoSize.y = if (swap) resolution.x else resolution.y
+                activity.runOnUiThread {
+                    setVideoSize()
+                    notifyFillOrientation()
+                }
             }
         }
 
@@ -563,8 +573,13 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                mVideoSize.x = videoSize.width
-                mVideoSize.y = (videoSize.height / videoSize.pixelWidthHeightRatio).toInt()
+                val width = videoSize.width
+                val height = (videoSize.height / videoSize.pixelWidthHeightRatio).toInt()
+                // Account for any rotation the player did not apply, so the stored size always
+                // reflects the real display orientation.
+                val swap = videoSize.unappliedRotationDegrees % 180 != 0
+                mVideoSize.x = if (swap) height else width
+                mVideoSize.y = if (swap) width else height
                 setVideoSize()
                 notifyFillOrientation()
             }
@@ -988,6 +1003,23 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         mVideoSize.x > mVideoSize.y -> true
         mVideoSize.x < mVideoSize.y -> false
         else -> null
+    }
+
+    // Rotation (0/90/180/270) the video must be displayed with, read from its metadata.
+    private fun getVideoRotation(): Int {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(mMedium.path)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+            }
+        }
     }
 
     // In the aspect-ratio + sensor mode the viewer locks the window to the orientation that keeps

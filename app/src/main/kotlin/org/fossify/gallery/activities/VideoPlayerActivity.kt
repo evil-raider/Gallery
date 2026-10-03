@@ -439,8 +439,12 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                mVideoSize.x = videoSize.width
-                mVideoSize.y = videoSize.height
+                // Account for any rotation the player did not apply, so the stored size always
+                // reflects the real display orientation (otherwise a portrait video stored as
+                // landscape + 90° rotation is mistaken for a landscape video).
+                val swap = videoSize.unappliedRotationDegrees % 180 != 0
+                mVideoSize.x = if (swap) videoSize.height else videoSize.width
+                mVideoSize.y = if (swap) videoSize.width else videoSize.height
                 setVideoSize()
             }
 
