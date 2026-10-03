@@ -1455,28 +1455,28 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // orientation. This keeps the photo/video filling the screen and visually "glued" while
     // the system bars and controls rotate normally.
     private fun applyFillRotation(windowOrientation: Int) {
-        if (config.screenRotation != ROTATE_BY_ASPECT_RATIO_AND_SENSOR || mIsOrientationLocked) {
-            resetFillRotation()
-            return
-        }
-
-        val fillLandscape = getCurrentMediaFillLandscape()
-        if (fillLandscape == null) {
-            resetFillRotation()
-            return
-        }
-
+        val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
         val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
-        val fillRotation = if (windowLandscape == fillLandscape) 0 else 90
-        val fragment = getCurrentFragment()
-        (fragment as? PhotoFragment)?.setFillRotation(fillRotation)
-        (fragment as? VideoFragment)?.setFillRotation(fillRotation)
+        when (val fragment = getCurrentFragment()) {
+            is PhotoFragment -> {
+                val fillLandscape = getCurrentMediaFillLandscape()
+                val fillRotation = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
+                fragment.setFillRotation(fillRotation)
+            }
+
+            is VideoFragment -> {
+                // The video fragment computes its own fill orientation from the real video size,
+                // so a vertical video that already fills a portrait screen is never rotated.
+                fragment.updateFillRotation(enabled, windowLandscape)
+            }
+        }
     }
 
     private fun resetFillRotation() {
-        val fragment = getCurrentFragment()
-        (fragment as? PhotoFragment)?.setFillRotation(0)
-        (fragment as? VideoFragment)?.setFillRotation(0)
+        when (val fragment = getCurrentFragment()) {
+            is PhotoFragment -> fragment.setFillRotation(0)
+            is VideoFragment -> fragment.updateFillRotation(false, false)
+        }
     }
 
     override fun fragmentClicked() {
