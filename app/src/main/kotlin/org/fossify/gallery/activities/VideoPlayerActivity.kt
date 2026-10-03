@@ -4,15 +4,15 @@ package org.fossify.gallery.activities
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 import android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Point
 import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
@@ -242,6 +242,9 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         initTimeHolder()
         binding.videoSurfaceFrame.onGlobalLayout {
             binding.videoSurfaceFrame.controller.resetState()
+            if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
+                applyGlueTransform()
+            }
         }
     }
 
@@ -251,6 +254,8 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
                 requestedOrientation = SCREEN_ORIENTATION_SENSOR
             } else if (config.screenRotation == ROTATE_BY_SYSTEM_SETTING) {
                 requestedOrientation = SCREEN_ORIENTATION_UNSPECIFIED
+            } else if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
+                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
             }
         }
     }
@@ -605,16 +610,26 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     }
 
     private fun setVideoSize() {
-        val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = windowManager.defaultDisplay
-        val screenWidth: Int
-        val screenHeight: Int
-
         val realMetrics = DisplayMetrics()
         display.getRealMetrics(realMetrics)
-        screenWidth = realMetrics.widthPixels
-        screenHeight = realMetrics.heightPixels
+        val screenWidth = realMetrics.widthPixels
+        val screenHeight = realMetrics.heightPixels
 
+        val multiplier = if (screenWidth > screenHeight) 0.5 else 0.8
+        mScreenWidth = (screenWidth * multiplier).toInt()
+
+        // Aspect-ratio + sensor mode: the window rotates freely with the device while the video
+        // content is counter-rotated through the texture matrix to stay glued and keep filling.
+        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
+            requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+            applyGlueTransform()
+            return
+        }
+
+        binding.videoSurface.setTransform(Matrix())
+
+        val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val screenProportion = screenWidth.toFloat() / screenHeight.toFloat()
 
         binding.videoSurface.layoutParams.apply {
@@ -628,42 +643,68 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
             binding.videoSurface.layoutParams = this
         }
 
-        val multiplier = if (screenWidth > screenHeight) 0.5 else 0.8
-        mScreenWidth = (screenWidth * multiplier).toInt()
-
-        if (!mIsOrientationLocked) {
+        if (!mIsOrientationLocked && config.screenRotation == ROTATE_BY_ASPECT_RATIO) {
             val fillLandscape = when {
                 mVideoSize.x > mVideoSize.y -> true
                 mVideoSize.x < mVideoSize.y -> false
                 else -> null
             }
             if (fillLandscape != null) {
-                when (config.screenRotation) {
-                    ROTATE_BY_ASPECT_RATIO -> {
-                        requestedOrientation = if (fillLandscape) {
-                            SCREEN_ORIENTATION_LANDSCAPE
-                        } else {
-                            SCREEN_ORIENTATION_PORTRAIT
-                        }
-                    }
-
-                    ROTATE_BY_ASPECT_RATIO_AND_SENSOR -> {
-                        // Keep the video filling the screen while still letting the window follow
-                        // the sensor between the two orientations that preserve that fill.
-                        requestedOrientation = if (fillLandscape) {
-                            SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                        } else {
-                            SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                        }
-                    }
+                requestedOrientation = if (fillLandscape) {
+                    SCREEN_ORIENTATION_LANDSCAPE
+                } else {
+                    SCREEN_ORIENTATION_PORTRAIT
                 }
             }
+        }
+    }
+
+    // Fill the whole frame and drive the display entirely through the texture transform, so the
+    // gesture layer's own fit stays identity and does not fight the rotation.
+    private fun applyGlueTransform() {
+        val frame = binding.videoSurfaceFrame
+        val w = frame.width
+        val h = frame.height
+        if (w == 0 || h == 0) {
+            frame.onGlobalLayout { applyGlueTransform() }
+            return
+        }
+
+        binding.videoSurface.layoutParams = binding.videoSurface.layoutParams.apply {
+            width = w
+            height = h
+        }
+
+        val vw = mVideoSize.x.toFloat()
+        val vh = mVideoSize.y.toFloat()
+        if (vw <= 0f || vh <= 0f) {
+            return
+        }
+
+        binding.videoSurface.setTransform(buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh))
+    }
+
+    // Un-stretches the surface, rotates the content by 90° when the window orientation does not
+    // match the video's fill orientation, and scales it to fill the screen, centered.
+    private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
+        val windowLandscape = w >= h
+        val fillLandscape = vw >= vh
+        val rotation = if (windowLandscape == fillLandscape) 0f else 90f
+        val scale = if (rotation == 0f) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
+        val contentWidth = vw * scale
+        val contentHeight = vh * scale
+        return Matrix().apply {
+            postTranslate(-w / 2f, -h / 2f)
+            postScale(contentWidth / w, contentHeight / h)
+            postRotate(rotation)
+            postTranslate(w / 2f, h / 2f)
         }
     }
 
     private fun toggleOrientation(orientation: Int) {
         mIsOrientationLocked = orientation != SCREEN_ORIENTATION_UNSPECIFIED
         requestedOrientation = orientation
+        setVideoSize()
     }
 
     private fun toggleFullscreen() {

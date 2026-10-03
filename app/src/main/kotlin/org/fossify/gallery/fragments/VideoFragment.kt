@@ -5,6 +5,7 @@ package org.fossify.gallery.fragments
 import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Point
 import android.graphics.SurfaceTexture
 import android.media.MediaMetadataRetriever
@@ -71,7 +72,6 @@ import org.fossify.commons.helpers.ensureBackgroundThread
 import org.fossify.gallery.R
 import org.fossify.gallery.activities.BaseViewerActivity
 import org.fossify.gallery.activities.VideoActivity
-import org.fossify.gallery.activities.ViewPagerActivity
 import org.fossify.gallery.databinding.PagerVideoItemBinding
 import org.fossify.gallery.extensions.config
 import org.fossify.gallery.extensions.getActionBarHeight
@@ -122,6 +122,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
 
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(1, 1)
+    private var mGlueEnabled = false
     private var mTimerHandler = Handler()
 
     private var mStoredShowExtendedDetails = false
@@ -304,7 +305,6 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
                 mVideoSize.y = if (swap) resolution.x else resolution.y
                 activity.runOnUiThread {
                     setVideoSize()
-                    notifyFillOrientation()
                 }
             }
         }
@@ -424,6 +424,9 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         setVideoSize()
         binding.videoSurfaceFrame.onGlobalLayout {
             binding.videoSurfaceFrame.controller.resetState()
+            if (mGlueEnabled) {
+                applyGlueTransform()
+            }
         }
     }
 
@@ -581,7 +584,6 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
                 mVideoSize.x = if (swap) height else width
                 mVideoSize.y = if (swap) width else height
                 setVideoSize()
-                notifyFillOrientation()
             }
 
             override fun onPlayerErrorChanged(error: PlaybackException?) {
@@ -973,6 +975,13 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     private fun setVideoSize() {
         if (activity == null || mConfig.gestureVideoPlayer) return
 
+        if (mGlueEnabled) {
+            applyGlueTransform()
+            return
+        }
+
+        mTextureView.setTransform(Matrix())
+
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = requireActivity().windowManager.defaultDisplay
         val screenWidth: Int
@@ -997,12 +1006,55 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         }
     }
 
-    // Fill orientation computed from the real (display) video size: true when it best fills a
-    // landscape screen, false for portrait, null when the size is not known yet.
-    fun getFillLandscape(): Boolean? = when {
-        mVideoSize.x > mVideoSize.y -> true
-        mVideoSize.x < mVideoSize.y -> false
-        else -> null
+    // Enabled by the viewer in the aspect-ratio + sensor mode. The window rotates freely with the
+    // device while the video content is counter-rotated to stay glued and keep filling the screen.
+    fun setGlueEnabled(enabled: Boolean) {
+        mGlueEnabled = enabled
+        if (mWasFragmentInit) {
+            setVideoSize()
+        }
+    }
+
+    // Fill the whole frame and drive the display entirely through the texture transform, so the
+    // gesture layer's own fit stays identity and does not fight the rotation.
+    private fun applyGlueTransform() {
+        val frame = binding.videoSurfaceFrame
+        val w = frame.width
+        val h = frame.height
+        if (w == 0 || h == 0) {
+            frame.onGlobalLayout { applyGlueTransform() }
+            return
+        }
+
+        mTextureView.layoutParams = mTextureView.layoutParams.apply {
+            width = w
+            height = h
+        }
+
+        val vw = mVideoSize.x.toFloat()
+        val vh = mVideoSize.y.toFloat()
+        if (vw <= 1f || vh <= 1f) {
+            return
+        }
+
+        mTextureView.setTransform(buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh))
+    }
+
+    // Un-stretches the surface, rotates the content by 90° when the window orientation does not
+    // match the video's fill orientation, and scales it to fill the screen, centered.
+    private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
+        val windowLandscape = w >= h
+        val fillLandscape = vw >= vh
+        val rotation = if (windowLandscape == fillLandscape) 0f else 90f
+        val scale = if (rotation == 0f) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
+        val contentWidth = vw * scale
+        val contentHeight = vh * scale
+        return Matrix().apply {
+            postTranslate(-w / 2f, -h / 2f)
+            postScale(contentWidth / w, contentHeight / h)
+            postRotate(rotation)
+            postTranslate(w / 2f, h / 2f)
+        }
     }
 
     // Rotation (0/90/180/270) the video must be displayed with, read from its metadata.
@@ -1020,12 +1072,6 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
             } catch (e: Exception) {
             }
         }
-    }
-
-    // In the aspect-ratio + sensor mode the viewer locks the window to the orientation that keeps
-    // the video filling the screen, so report the fill orientation once the real size is known.
-    private fun notifyFillOrientation() {
-        (activity as? ViewPagerActivity)?.updateVideoFillOrientation(this, getFillLandscape())
     }
 
     private fun handleTouchHoldEvent(event: MotionEvent) {
