@@ -20,10 +20,12 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.Icon
+import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.os.Handler
 import android.provider.MediaStore
 import android.view.MenuItem
+import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
@@ -258,11 +260,13 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
         val filename = getCurrentMedium()?.name ?: mPath.getFilenameFromPath()
         binding.mediumViewerToolbar.title = filename
+        registerDisplayListener()
     }
 
     override fun onPause() {
         super.onPause()
         stopSlideshow()
+        unregisterDisplayListener()
     }
 
     override fun onDestroy() {
@@ -1457,15 +1461,56 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private fun applyFillRotation(windowOrientation: Int) {
         val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
         val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
+        // When the device is held in a reversed orientation the whole window is flipped 180°, which
+        // would also flip the media. Add a 180° counter-rotation so the photo/video stays upright and
+        // glued in its fill orientation while the system bars and controls keep rotating normally.
+        val reverse = if (enabled && isReverseDisplayRotation()) 180 else 0
         when (val fragment = getCurrentFragment()) {
             is PhotoFragment -> {
                 val fillLandscape = getCurrentMediaFillLandscape()
-                val fillRotation = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
-                fragment.setFillRotation(fillRotation)
+                val base = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
+                fragment.setFillRotation(base + reverse)
             }
 
             is VideoFragment -> fragment.setGlueEnabled(enabled)
         }
+    }
+
+    // True when the display is in one of the two "reversed" rotations (180°/270°). These share the
+    // same Configuration.orientation as their upright counterparts (0°/90°), so onConfigurationChanged
+    // alone cannot distinguish them; the DisplayListener below drives the refresh for those flips.
+    @Suppress("DEPRECATION")
+    private fun isReverseDisplayRotation(): Boolean {
+        val rotation = windowManager.defaultDisplay.rotation
+        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
+    }
+
+    private var mDisplayListener: DisplayManager.DisplayListener? = null
+
+    private fun registerDisplayListener() {
+        if (mDisplayListener != null) {
+            return
+        }
+        val displayManager = getSystemService(DisplayManager::class.java) ?: return
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                // Fires on every rotation, including 0°<->180° and 90°<->270° flips that keep the
+                // same Configuration.orientation, so re-glue the media and keep it from flipping 180°.
+                if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
+                    applyFillRotation(resources.configuration.orientation)
+                }
+            }
+        }
+        displayManager.registerDisplayListener(listener, Handler())
+        mDisplayListener = listener
+    }
+
+    private fun unregisterDisplayListener() {
+        val listener = mDisplayListener ?: return
+        getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(listener)
+        mDisplayListener = null
     }
 
     private fun resetFillRotation() {

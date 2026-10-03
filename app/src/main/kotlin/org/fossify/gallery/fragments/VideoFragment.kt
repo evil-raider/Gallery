@@ -1045,8 +1045,12 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
         val windowLandscape = w >= h
         val fillLandscape = vw >= vh
-        val rotation = if (windowLandscape == fillLandscape) 0f else 90f
-        val scale = if (rotation == 0f) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
+        // Add a 180° counter-rotation in the reversed orientations so the video stays upright and
+        // glued instead of flipping together with the window.
+        val reverse = if (isReverseDisplayRotation()) 180f else 0f
+        val rotation = ((if (windowLandscape == fillLandscape) 0f else 90f) + reverse) % 360f
+        val swapped = rotation == 90f || rotation == 270f
+        val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
         val contentWidth = vw * scale
         val contentHeight = vh * scale
         return Matrix().apply {
@@ -1055,6 +1059,13 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
             postRotate(rotation)
             postTranslate(w / 2f, h / 2f)
         }
+    }
+
+    // True in the two "reversed" rotations (180°/270°), used to keep the glued video upright.
+    @Suppress("DEPRECATION")
+    private fun isReverseDisplayRotation(): Boolean {
+        val rotation = (activity ?: return false).windowManager.defaultDisplay.rotation
+        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
     }
 
     // Rotation (0/90/180/270) the video must be displayed with, read from its metadata.

@@ -16,6 +16,7 @@ import android.graphics.Matrix
 import android.graphics.Point
 import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -181,11 +182,13 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
 
         mOriginalBrightness = window.updateBrightness(config.maxBrightness, mOriginalBrightness)
         updateTextColors(binding.videoPlayerHolder)
+        registerDisplayListener()
     }
 
     override fun onPause() {
         super.onPause()
         pauseVideo()
+        unregisterDisplayListener()
 
         if (config.rememberLastVideoPosition && mWasVideoStarted) {
             saveVideoProgress()
@@ -689,8 +692,12 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
         val windowLandscape = w >= h
         val fillLandscape = vw >= vh
-        val rotation = if (windowLandscape == fillLandscape) 0f else 90f
-        val scale = if (rotation == 0f) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
+        // Add a 180° counter-rotation in the reversed orientations so the video stays upright and
+        // glued instead of flipping together with the window.
+        val reverse = if (isReverseDisplayRotation()) 180f else 0f
+        val rotation = ((if (windowLandscape == fillLandscape) 0f else 90f) + reverse) % 360f
+        val swapped = rotation == 90f || rotation == 270f
+        val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
         val contentWidth = vw * scale
         val contentHeight = vh * scale
         return Matrix().apply {
@@ -699,6 +706,41 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
             postRotate(rotation)
             postTranslate(w / 2f, h / 2f)
         }
+    }
+
+    // True in the two "reversed" rotations (180°/270°), used to keep the glued video upright.
+    @Suppress("DEPRECATION")
+    private fun isReverseDisplayRotation(): Boolean {
+        val rotation = windowManager.defaultDisplay.rotation
+        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
+    }
+
+    private var mDisplayListener: DisplayManager.DisplayListener? = null
+
+    private fun registerDisplayListener() {
+        if (mDisplayListener != null) {
+            return
+        }
+        val displayManager = getSystemService(DisplayManager::class.java) ?: return
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                // Catch 0°<->180° and 90°<->270° flips that keep the same Configuration.orientation
+                // so the glued video is re-rendered and never flips 180°.
+                if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
+                    setVideoSize()
+                }
+            }
+        }
+        displayManager.registerDisplayListener(listener, Handler())
+        mDisplayListener = listener
+    }
+
+    private fun unregisterDisplayListener() {
+        val listener = mDisplayListener ?: return
+        getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(listener)
+        mDisplayListener = null
     }
 
     private fun toggleOrientation(orientation: Int) {

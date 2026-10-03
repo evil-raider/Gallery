@@ -16,4 +16,10 @@
     </style>
 
     <style name="FullScreenTheme" parent="FullScreenTheme.Base" />
+
+    <!-- Thinner/lighter filename shown in the media viewer top bar. -->
+    <style name="MediumViewerToolbarTitle" parent="@style/TextAppearance.Widget.AppCompat.Toolbar.Title">
+        <item name="android:fontFamily">sans-serif-light</item>
+        <item name="android:textSize">16sp</item>
+    </style>
 </resources>
