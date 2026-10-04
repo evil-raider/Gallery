@@ -8,7 +8,6 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
@@ -34,10 +33,7 @@ abstract class BaseViewerActivity : SimpleActivity() {
     private var landscapeTitleView: TextView? = null
     private var statusBarHeight = 0
     private var currentOrientation = Configuration.ORIENTATION_UNDEFINED
-    private val landscapeTitleSyncListener = ViewTreeObserver.OnPreDrawListener {
-        syncLandscapeTitleVisibility()
-        true
-    }
+    private var isViewerChromeVisible = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,13 +59,6 @@ abstract class BaseViewerActivity : SimpleActivity() {
         super.onConfigurationChanged(newConfig)
         currentOrientation = newConfig.orientation
         applyViewerTitle()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (landscapeTitleView != null) {
-            window.decorView.viewTreeObserver.removeOnPreDrawListener(landscapeTitleSyncListener)
-        }
     }
 
     /**
@@ -125,24 +114,37 @@ abstract class BaseViewerActivity : SimpleActivity() {
         )
 
         parent.addView(view, params)
-        window.decorView.viewTreeObserver.addOnPreDrawListener(landscapeTitleSyncListener)
         landscapeTitleView = view
         return view
     }
 
-    // keep the separate title in sync with the toolbar fading in/out on fullscreen toggling
-    private fun syncLandscapeTitleVisibility() {
+    /**
+     * Fades the separate landscape title together with the top bar. Called by the viewers right where
+     * they animate their app bar / toolbar on fullscreen toggling (no per-frame syncing needed).
+     */
+    fun animateViewerTitle(visible: Boolean) {
+        isViewerChromeVisible = visible
         val view = landscapeTitleView ?: return
-        val shown = isLandscape() && appBarLayout.visibility == View.VISIBLE && viewerToolbar.visibility == View.VISIBLE
-        val newVisibility = if (shown) View.VISIBLE else View.GONE
-        if (view.visibility != newVisibility) {
-            view.visibility = newVisibility
+        if (!isLandscape()) {
+            view.visibility = View.GONE
+            return
         }
 
-        val newAlpha = appBarLayout.alpha * viewerToolbar.alpha
-        if (view.alpha != newAlpha) {
-            view.alpha = newAlpha
-        }
+        val newAlpha = if (visible) 1f else 0f
+        view.animate().cancel()
+        view.animate().alpha(newAlpha).withStartAction {
+            view.visibility = View.VISIBLE
+        }.withEndAction {
+            view.visibility = if (visible) View.VISIBLE else View.GONE
+        }.start()
+    }
+
+    private fun syncLandscapeTitleVisibility() {
+        val view = landscapeTitleView ?: return
+        view.animate().cancel()
+        val shown = isLandscape() && isViewerChromeVisible
+        view.visibility = if (shown) View.VISIBLE else View.GONE
+        view.alpha = if (shown) 1f else 0f
     }
 
     private fun setupEdgeToEdge(insets: WindowInsetsCompat) {

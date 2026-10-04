@@ -20,7 +20,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.RelativeLayout
 import androidx.core.graphics.drawable.toBitmapOrNull
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat.Type
@@ -119,9 +118,11 @@ class PhotoFragment : ViewPagerFragment() {
 
     var mCurrentRotationDegrees = 0
 
-    // Extra rotation applied on top of the user rotation to keep the image glued and filling
-    // the screen in the "aspect ratio + device rotation" mode, where the window rotates freely.
-    private var mFillRotationDegrees = 0
+    // Fill orientation of this file for the "aspect ratio + device rotation" glue mode (true = wide,
+    // false = tall, null = square/unknown). Read once on a background thread, so re-gluing on a turn
+    // never touches the file on the main thread.
+    private var mFillLandscape: Boolean? = null
+    private var mFillLandscapeLoaded = false
     private var mIsFragmentVisible = false
     private var mIsFullscreen = false
     private var mWasInit = false
@@ -444,9 +445,11 @@ class PhotoFragment : ViewPagerFragment() {
             mImageOrientation = getImageOrientation()
             // Decide how the photo must be rotated to fill the screen BEFORE it is first drawn, so it
             // appears already glued instead of showing upright and then visibly re-rotating.
-            val glueDegrees = computeGlueDegrees()
+            val fillLandscape = if (listener?.isFillGlueEnabled() == true) listener?.getFillLandscape(mMedium.path) else null
             activity?.runOnUiThread {
-                applyViewGlue(glueDegrees)
+                mFillLandscape = fillLandscape
+                mFillLandscapeLoaded = true
+                applyViewGlue(computeGlueDegrees())
                 when {
                     mMedium.isGIF() -> loadGif()
                     mMedium.isSVG() -> loadSVG()
@@ -535,9 +538,8 @@ class PhotoFragment : ViewPagerFragment() {
             .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
             .fitCenter()
             .run {
-                val totalRotation = normalizeRotation(mCurrentRotationDegrees + mFillRotationDegrees)
-                if (totalRotation != 0) {
-                    transform(Rotate(totalRotation))
+                if (mCurrentRotationDegrees != 0) {
+                    transform(Rotate(mCurrentRotationDegrees))
                         .diskCacheStrategy(DiskCacheStrategy.NONE)
                 } else {
                     this
@@ -585,9 +587,8 @@ class PhotoFragment : ViewPagerFragment() {
                 .stableKey(mMedium.getSignature())
                 .resize(mScreenWidth, mScreenHeight)
 
-            val totalRotation = normalizeRotation(mCurrentRotationDegrees + mFillRotationDegrees)
-            if (totalRotation != 0) {
-                picasso.rotate(totalRotation.toFloat())
+            if (mCurrentRotationDegrees != 0) {
+                picasso.rotate(mCurrentRotationDegrees.toFloat())
             } else {
                 degreesForRotation(mImageOrientation).toFloat()
             }
@@ -778,7 +779,7 @@ class PhotoFragment : ViewPagerFragment() {
             override fun make() = PicassoRegionDecoder(showHighestQuality, mScreenWidth, mScreenHeight, minTileDpi)
         }
 
-        var newOrientation = (rotation + mCurrentRotationDegrees + mFillRotationDegrees) % 360
+        var newOrientation = (rotation + mCurrentRotationDegrees) % 360
         if (newOrientation < 0) {
             newOrientation += 360
         }
@@ -935,16 +936,17 @@ class PhotoFragment : ViewPagerFragment() {
         return normalized
     }
 
-    // Called by the viewer in the "aspect ratio + device rotation" mode.
-    fun setFillRotation(degrees: Int) {
+    // Called by the viewer when the glue mode gets turned off (e.g. orientation locked manually).
+    fun resetGlue() {
         if (mWasInit) {
-            applyViewGlue(degrees)
+            applyViewGlue(0)
         }
     }
 
-    // Re-glue using the viewer's current rotation (cached fill orientation, no I/O).
+    // Re-glue using the current display rotation and the cached fill orientation (no I/O).
+    // Before the background load finished there is nothing to re-glue: the load applies it itself.
     fun refreshGlue() {
-        if (!mWasInit) {
+        if (!mWasInit || !mFillLandscapeLoaded) {
             return
         }
         applyViewGlue(computeGlueDegrees())
@@ -958,7 +960,7 @@ class PhotoFragment : ViewPagerFragment() {
         if (!listener.isFillGlueEnabled()) {
             return 0
         }
-        var fillLandscape = listener.getFillLandscape(mMedium.path)
+        var fillLandscape = mFillLandscape
         if (fillLandscape != null && mCurrentRotationDegrees % 180 != 0) {
             fillLandscape = !fillLandscape
         }
@@ -976,16 +978,23 @@ class PhotoFragment : ViewPagerFragment() {
         val w = size.x
         val h = size.y
 
-        var sizeChanged = false
+        val oldWidth = binding.gesturesView.width
+        val oldHeight = binding.gesturesView.height
+        var paramsChanged = false
         for (view in listOf<View>(binding.gesturesView, binding.subsamplingView)) {
             if (view.applyGlueLayout(rotation, w, h)) {
-                sizeChanged = true
+                paramsChanged = true
             }
         }
 
-        if (sizeChanged) {
+        // On a normal glued turn the views keep their real size (only the rotation and the
+        // MATCH_PARENT <-> explicit size params change), so keep the user's zoom. Reset only when the
+        // measured size really changed, otherwise the old zoom state would not fit the new viewport.
+        if (paramsChanged) {
             binding.photoHolder.onGlobalLayout {
-                if (this.activity != null) {
+                if (this.activity != null &&
+                    (binding.gesturesView.width != oldWidth || binding.gesturesView.height != oldHeight)
+                ) {
                     binding.gesturesView.controller.resetState()
                     if (mIsSubsamplingVisible) {
                         binding.subsamplingView.resetView()

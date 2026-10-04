@@ -430,6 +430,7 @@ open class PhotoVideoActivity : BaseViewerActivity(), ViewPagerFragment.Fragment
         }.withEndAction {
             binding.fragmentViewerToolbar.beVisibleIf(newAlpha == 1f)
         }.start()
+        animateViewerTitle(newAlpha == 1f)
     }
 
     override fun videoEnded() = false
@@ -443,6 +444,4 @@ open class PhotoVideoActivity : BaseViewerActivity(), ViewPagerFragment.Fragment
     override fun isSlideShowActive() = false
 
     override fun isFullScreen() = mIsFullScreen
-
-    override fun getFillRotation(path: String) = 0
 }

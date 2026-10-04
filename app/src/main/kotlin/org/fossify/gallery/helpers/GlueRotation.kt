@@ -1,12 +1,19 @@
 package org.fossify.gallery.helpers
 
 import android.app.Activity
+import android.content.Context
+import android.graphics.Matrix
 import android.graphics.Point
+import android.media.MediaMetadataRetriever
 import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
-import android.widget.RelativeLayout
 import android.view.WindowManager
+import android.widget.RelativeLayout
+import androidx.core.net.toUri
+import org.fossify.commons.extensions.getAndroidSAFUri
+import org.fossify.commons.extensions.isRestrictedSAFOnlyRoot
 
 /**
  * Clockwise rotation (0/90/180/270) to apply to media content, relative to the window, so it stays
@@ -104,11 +111,13 @@ fun View.applyGlueLayout(rotation: Int, frameWidth: Int, frameHeight: Int): Bool
 // matching during video), HDR/brightness-related changes and other displays. Re-gluing on every such
 // event would force relayouts/redraws for nothing, so only report actual rotation changes of the
 // display this activity is on.
+// Shared by the display listener and onConfigurationChanged: whichever reports a new rotation first
+// handles it, the other one sees no change and skips the duplicate re-glue.
 class DisplayRotationFilter {
     private var lastRotation = -1
 
     @Suppress("DEPRECATION")
-    fun isRotationChange(activity: Activity, displayId: Int): Boolean {
+    fun isRotationChange(activity: Activity, displayId: Int = activity.windowManager.defaultDisplay.displayId): Boolean {
         val display = activity.windowManager.defaultDisplay
         if (displayId != display.displayId) {
             return false
@@ -120,4 +129,105 @@ class DisplayRotationFilter {
         lastRotation = rotation
         return true
     }
+
+    // Forget the last rotation, e.g. on resume: the device may have turned while the listener was off.
+    fun reset() {
+        lastRotation = -1
+    }
+}
+
+/**
+ * Real display size of a video (rotation metadata applied), read with a single metadata retriever.
+ * A portrait phone video is usually stored as landscape + 90° rotation, so the coded size alone
+ * would be mistaken for a landscape video. Handles plain paths, content:// URIs and SAF-only roots.
+ */
+fun Context.getVideoDisplaySize(path: String): Point? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        when {
+            path.startsWith("content://", true) -> retriever.setDataSource(this, path.toUri())
+            isRestrictedSAFOnlyRoot(path) -> retriever.setDataSource(this, getAndroidSAFUri(path))
+            else -> retriever.setDataSource(path)
+        }
+        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        when {
+            width <= 0 || height <= 0 -> null
+            rotation % 180 != 0 -> Point(height, width)
+            else -> Point(width, height)
+        }
+    } catch (ignored: Exception) {
+        null
+    } finally {
+        try {
+            retriever.release()
+        } catch (ignored: Exception) {
+        }
+    }
+}
+
+/**
+ * Glues a video drawn into [texture] inside [frame]: the texture fills the frame and the content is
+ * un-stretched, counter-rotated by the display rotation and scaled to fit, centered.
+ * Returns the applied rotation (0/90/180/270), or null when the frame is not laid out yet (it then
+ * retries by itself after the next layout and calls [onApplied]) or the video size is unknown.
+ */
+fun Activity.applyTextureGlue(
+    frame: View,
+    texture: TextureView,
+    videoWidth: Int,
+    videoHeight: Int,
+    onApplied: ((rotation: Int, width: Int, height: Int) -> Unit)? = null
+): Int? {
+    if (frame.width == 0 || frame.height == 0) {
+        frame.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                frame.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                if (!isDestroyed && frame.width > 0 && frame.height > 0) {
+                    applyTextureGlue(frame, texture, videoWidth, videoHeight, onApplied)
+                }
+            }
+        })
+        return null
+    }
+
+    // Right after a turn the frame still reports its old size until the next layout. Use the size
+    // matching the current display orientation, so the very first frame is already glued.
+    val size = currentOrientedSize(frame.width, frame.height)
+    val w = size.x
+    val h = size.y
+
+    val params = texture.layoutParams
+    if (params.width != w || params.height != h) {
+        params.width = w
+        params.height = h
+        texture.layoutParams = params
+    }
+
+    if (videoWidth <= 1 || videoHeight <= 1) {
+        return null
+    }
+
+    val vw = videoWidth.toFloat()
+    val vh = videoHeight.toFloat()
+    val fillLandscape = when {
+        vw > vh -> true
+        vw < vh -> false
+        else -> null
+    }
+    // Same formula as photos: counter-rotate by the display rotation, so the video keeps one
+    // orientation relative to the physical screen and never flips 180°.
+    val rotation = getGlueRotation(fillLandscape)
+    val swapped = rotation % 180 != 0
+    val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
+    val matrix = Matrix().apply {
+        postTranslate(-w / 2f, -h / 2f)
+        postScale(vw * scale / w, vh * scale / h)
+        postRotate(rotation.toFloat())
+        postTranslate(w / 2f, h / 2f)
+    }
+    texture.setTransform(matrix)
+    onApplied?.invoke(rotation, w, h)
+    return rotation
 }

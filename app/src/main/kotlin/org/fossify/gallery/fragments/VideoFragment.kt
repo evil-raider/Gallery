@@ -8,10 +8,10 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Point
 import android.graphics.SurfaceTexture
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
@@ -59,7 +59,6 @@ import org.fossify.commons.extensions.fadeOut
 import org.fossify.commons.extensions.getDuration
 import org.fossify.commons.extensions.getFormattedDuration
 import org.fossify.commons.extensions.getProperTextColor
-import org.fossify.commons.extensions.getVideoResolution
 import org.fossify.commons.extensions.isGone
 import org.fossify.commons.extensions.isVisible
 import org.fossify.commons.extensions.onGlobalLayout
@@ -85,8 +84,8 @@ import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
 import org.fossify.gallery.helpers.applyGlueLayout
-import org.fossify.gallery.helpers.currentOrientedSize
-import org.fossify.gallery.helpers.getGlueRotation
+import org.fossify.gallery.helpers.applyTextureGlue
+import org.fossify.gallery.helpers.getVideoDisplaySize
 import org.fossify.gallery.helpers.MEDIUM
 import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
 import org.fossify.gallery.interfaces.PlaybackSpeedListener
@@ -126,8 +125,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(1, 1)
     private var mGlueEnabled = false
-    private var mGlueRotation = 0
-    private var mTimerHandler = Handler()
+    private var mTimerHandler = Handler(Looper.getMainLooper())
 
     private var mStoredShowExtendedDetails = false
     private var mStoredHideExtendedDetails = false
@@ -305,20 +303,19 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         // checkIfPanorama() TODO: Implement panorama using a FOSS library
 
         ensureBackgroundThread {
-            val resolution = activity.getVideoResolution(mMedium.path)
-            if (resolution != null) {
-                // getVideoResolution returns the coded (unrotated) size, so apply the file's
-                // rotation metadata to get the real display size. Otherwise a portrait video
-                // stored as landscape + 90° rotation is mistaken for a landscape video.
-                val swap = getVideoRotation() % 180 != 0
-                mVideoSize.x = if (swap) resolution.y else resolution.x
-                mVideoSize.y = if (swap) resolution.x else resolution.y
-                activity.runOnUiThread {
-                    setVideoSize()
+            // Real display size (rotation metadata applied), read with a single file open.
+            val size = activity.getVideoDisplaySize(mMedium.path)
+            activity.runOnUiThread {
+                if (this.activity == null) {
+                    return@runOnUiThread
                 }
-            } else {
-                // Size unknown: show the preview unglued rather than not at all.
-                activity.runOnUiThread {
+                if (size != null) {
+                    // mVideoSize is only ever touched on the main thread.
+                    mVideoSize.x = size.x
+                    mVideoSize.y = size.y
+                    setVideoSize()
+                } else {
+                    // Size unknown: show the preview unglued rather than not at all.
                     binding.videoPreview.alpha = 1f
                 }
             }
@@ -1032,86 +1029,20 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     }
 
     // Fill the whole frame and drive the display entirely through the texture transform, so the
-    // gesture layer's own fit stays identity and does not fight the rotation.
+    // gesture layer's own fit stays identity and does not fight the rotation. The preview (shown
+    // before playback starts) is a separate ImageView, so it is glued with exactly the same rotation,
+    // otherwise the video would visibly jump/flip when playback starts.
     private fun applyGlueTransform() {
-        val frame = binding.videoSurfaceFrame
-        if (frame.width == 0 || frame.height == 0) {
-            frame.onGlobalLayout { applyGlueTransform() }
-            return
+        val activity = activity ?: return
+        activity.applyTextureGlue(binding.videoSurfaceFrame, mTextureView, mVideoSize.x, mVideoSize.y) { rotation, w, h ->
+            applyPreviewGlue(rotation, w, h)
         }
-        // Right after a turn the frame still reports its old size until the next layout. Use the size
-        // matching the current display orientation, so the very first frame is already glued.
-        val size = requireActivity().currentOrientedSize(frame.width, frame.height)
-        val w = size.x
-        val h = size.y
-
-        val surfaceParams = mTextureView.layoutParams
-        if (surfaceParams.width != w || surfaceParams.height != h) {
-            surfaceParams.width = w
-            surfaceParams.height = h
-            mTextureView.layoutParams = surfaceParams
-        }
-
-        val vw = mVideoSize.x.toFloat()
-        val vh = mVideoSize.y.toFloat()
-        if (vw <= 1f || vh <= 1f) {
-            return
-        }
-
-        val matrix = buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh)
-        mTextureView.setTransform(matrix)
-        applyPreviewGlue(mGlueRotation, w, h)
     }
 
-    // The preview (shown before playback starts) is a separate ImageView, so glue it with exactly the
-    // same rotation as the playing video. Otherwise it rotates with the UI and the video visibly
-    // jumps/flips when playback starts. The view is sized to the swapped frame and rotated around
-    // its center, and its fitCenter scaling then fills the screen the same way as the texture.
     private fun applyPreviewGlue(rotation: Int, w: Int, h: Int) {
         val preview = binding.videoPreview
         preview.applyGlueLayout(rotation, w, h)
         preview.alpha = 1f
-    }
-
-    // Un-stretches the surface, rotates the content by 90° when the window orientation does not
-    // match the video's fill orientation, and scales it to fill the screen, centered.
-    private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
-        val fillLandscape = when {
-            vw > vh -> true
-            vw < vh -> false
-            else -> null
-        }
-        // Same formula as photos: counter-rotate by the display rotation, so the video keeps one
-        // orientation relative to the physical screen and never flips 180°.
-        mGlueRotation = requireActivity().getGlueRotation(fillLandscape)
-        val rotation = mGlueRotation.toFloat()
-        val swapped = rotation == 90f || rotation == 270f
-        val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
-        val contentWidth = vw * scale
-        val contentHeight = vh * scale
-        return Matrix().apply {
-            postTranslate(-w / 2f, -h / 2f)
-            postScale(contentWidth / w, contentHeight / h)
-            postRotate(rotation)
-            postTranslate(w / 2f, h / 2f)
-        }
-    }
-
-    // Rotation (0/90/180/270) the video must be displayed with, read from its metadata.
-    private fun getVideoRotation(): Int {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(mMedium.path)
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                ?.toIntOrNull() ?: 0
-        } catch (e: Exception) {
-            0
-        } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {
-            }
-        }
     }
 
     private fun handleTouchHoldEvent(event: MotionEvent) {

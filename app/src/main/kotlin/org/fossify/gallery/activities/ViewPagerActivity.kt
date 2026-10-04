@@ -23,6 +23,7 @@ import android.graphics.drawable.Icon
 import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.view.MenuItem
 import android.view.View
@@ -75,6 +76,7 @@ import org.fossify.commons.extensions.isPortrait
 import org.fossify.commons.extensions.isRawFast
 import org.fossify.commons.extensions.isSvg
 import org.fossify.commons.extensions.isVideoFast
+import org.fossify.commons.extensions.isVideoSlow
 import org.fossify.commons.extensions.needsStupidWritePermissions
 import org.fossify.commons.extensions.onGlobalLayout
 import org.fossify.commons.extensions.recycleBinPath
@@ -163,7 +165,7 @@ import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
 import org.fossify.gallery.helpers.DisplayRotationFilter
-import org.fossify.gallery.helpers.getGlueRotation
+import org.fossify.gallery.helpers.getVideoDisplaySize
 import org.fossify.gallery.helpers.setSeamlessRotation
 import org.fossify.gallery.helpers.SHOW_ALL
 import org.fossify.gallery.helpers.SHOW_FAVORITES
@@ -205,7 +207,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private var mIsSlideshowActive = false
     private var mPrevHashcode = 0
 
-    private var mSlideshowHandler = Handler()
+    private var mSlideshowHandler = Handler(Looper.getMainLooper())
     private var mSlideshowInterval = SLIDESHOW_DEFAULT_INTERVAL
     private var mSlideshowMoveBackwards = false
     private var mSlideshowMedia = mutableListOf<Medium>()
@@ -267,7 +269,16 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
 
         val filename = getCurrentMedium()?.name ?: mPath.getFilenameFromPath()
         setViewerTitle(filename)
-        registerDisplayListener()
+        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
+            registerDisplayListener()
+            // The device may have been turned (even 180°, which brings no configuration change)
+            // while the listener was off, so re-glue right away.
+            mRotationFilter.reset()
+            mRotationFilter.isRotationChange(this)
+            if (isFillGlueEnabled()) {
+                applyFillRotation()
+            }
+        }
     }
 
     override fun onPause() {
@@ -420,11 +431,9 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         super.onConfigurationChanged(newConfig)
         initBottomActionsLayout()
         applyToolbarLift()
-        // The window just rotated with the device; in the aspect-ratio + sensor mode the
-        // whole UI rotates, so re-apply the counter-rotation that keeps the media glued.
-        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
-            applyFillRotation(newConfig.orientation)
-        }
+        // The pages re-glue themselves in their own onConfigurationChanged; only mark this turn as
+        // handled, so the display listener does not re-glue every page a second time.
+        mRotationFilter.isRotationChange(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1461,8 +1470,10 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
                 // Let the whole window (status bar, notification shade and all app controls)
                 // rotate freely with the device, and counter-rotate only the media content so it
                 // stays glued in the orientation that fills the screen.
-                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
-                applyFillRotation(resources.configuration.orientation)
+                if (requestedOrientation != SCREEN_ORIENTATION_FULL_SENSOR) {
+                    requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+                }
+                applyFillRotation()
             }
         }
     }
@@ -1471,6 +1482,17 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private fun getCurrentMediaFillLandscape(): Boolean? = getMediaFillLandscape(getCurrentPath())
 
     private fun getMediaFillLandscape(path: String): Boolean? {
+        if (path.isVideoFast() || path.isVideoSlow()) {
+            // Videos have no EXIF: use the rotation metadata, otherwise a portrait phone video
+            // (stored as landscape + 90°) would be treated as landscape.
+            val size = applicationContext.getVideoDisplaySize(path) ?: return null
+            return when {
+                size.x > size.y -> true
+                size.x < size.y -> false
+                else -> null
+            }
+        }
+
         var flipSides = false
         try {
             val exif = ExifInterface(path)
@@ -1493,7 +1515,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // media content by 90° whenever the window orientation does not match its fill orientation.
     // This keeps the photo/video filling the screen and visually "glued" while the system bars and
     // controls rotate normally. Photos use a Glide/subsampling rotation, videos a texture matrix.
-    private fun applyFillRotation(@Suppress("UNUSED_PARAMETER") windowOrientation: Int) {
+    private fun applyFillRotation() {
         val enabled = isFillGlueEnabled()
         setSeamlessRotation(enabled)
         // Re-glue EVERY created page, not only the current one: the pager keeps neighbours alive,
@@ -1501,27 +1523,14 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         val fragments = (binding.viewPager.adapter as? MyPagerAdapter)?.getAllFragments() ?: return
         for (fragment in fragments) {
             when (fragment) {
-                is PhotoFragment -> if (enabled) fragment.refreshGlue() else fragment.setFillRotation(0)
+                is PhotoFragment -> if (enabled) fragment.refreshGlue() else fragment.resetGlue()
                 is VideoFragment -> fragment.setGlueEnabled(enabled)
             }
         }
     }
 
-    // Single source of truth for a photo's fill rotation, reused both for live rotation updates and
-    // for pre-rotating a photo before it is first drawn (so it never visibly re-rotates after load).
-    // Returns the degrees (0/90/180/270) the content must be rotated by to stay glued and filling,
-    // including the 180° counter-rotation for the reversed device orientations.
-    override fun getFillRotation(path: String): Int = computeFillRotation(path)
-
     override fun isFillGlueEnabled(): Boolean =
         config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
-
-    private fun computeFillRotation(path: String): Int {
-        if (!isFillGlueEnabled()) {
-            return 0
-        }
-        return getGlueRotation(getCachedFillLandscape(path))
-    }
 
     // The fill orientation of a file never changes, so read EXIF/resolution once. Re-gluing on every
     // turn then is pure math on the main thread, with no I/O.
@@ -1564,11 +1573,11 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
                 // Fires on every rotation, including 0°<->180° and 90°<->270° flips that keep the
                 // same Configuration.orientation, so re-glue the media and keep it from flipping 180°.
                 if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
-                    applyFillRotation(resources.configuration.orientation)
+                    applyFillRotation()
                 }
             }
         }
-        displayManager.registerDisplayListener(listener, Handler())
+        displayManager.registerDisplayListener(listener, Handler(Looper.getMainLooper()))
         mDisplayListener = listener
     }
 
@@ -1583,7 +1592,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         val fragments = (binding.viewPager.adapter as? MyPagerAdapter)?.getAllFragments() ?: return
         for (fragment in fragments) {
             when (fragment) {
-                is PhotoFragment -> fragment.setFillRotation(0)
+                is PhotoFragment -> fragment.resetGlue()
                 is VideoFragment -> fragment.setGlueEnabled(false)
             }
         }
@@ -1668,6 +1677,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             }.withEndAction {
                 binding.mediumViewerAppbar.beVisibleIf(newAlpha == 1f)
             }.start()
+            animateViewerTitle(newAlpha == 1f)
         }
     }
 

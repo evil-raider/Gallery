@@ -20,6 +20,7 @@ import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
@@ -85,9 +86,8 @@ import org.fossify.gallery.helpers.DRAG_THRESHOLD
 import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
-import org.fossify.gallery.helpers.currentOrientedSize
+import org.fossify.gallery.helpers.applyTextureGlue
 import org.fossify.gallery.helpers.DisplayRotationFilter
-import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.setSeamlessRotation
 import org.fossify.gallery.helpers.GO_TO_NEXT_ITEM
 import org.fossify.gallery.helpers.GO_TO_PREV_ITEM
@@ -133,7 +133,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     private var mUri: Uri? = null
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(0, 0)
-    private var mTimerHandler = Handler()
+    private var mTimerHandler = Handler(Looper.getMainLooper())
     private var mPlayWhenReadyHandler = Handler()
 
     private var mIgnoreCloseDown = false
@@ -190,7 +190,16 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
 
         mOriginalBrightness = window.updateBrightness(config.maxBrightness, mOriginalBrightness)
         updateTextColors(binding.videoPlayerHolder)
-        registerDisplayListener()
+        if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR) {
+            registerDisplayListener()
+            // The device may have been turned (even 180°, which brings no configuration change)
+            // while the listener was off, so re-glue right away.
+            mRotationFilter.reset()
+            mRotationFilter.isRotationChange(this)
+            if (!mIsOrientationLocked && mVideoSize.x > 0 && mVideoSize.y > 0) {
+                setVideoSize()
+            }
+        }
     }
 
     override fun onPause() {
@@ -249,6 +258,8 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // Handled here, so a display-listener callback for the same turn becomes a no-op.
+        mRotationFilter.isRotationChange(this)
         setVideoSize()
         initTimeHolder()
         binding.videoSurfaceFrame.onGlobalLayout {
@@ -677,54 +688,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     // Fill the whole frame and drive the display entirely through the texture transform, so the
     // gesture layer's own fit stays identity and does not fight the rotation.
     private fun applyGlueTransform() {
-        val frame = binding.videoSurfaceFrame
-        if (frame.width == 0 || frame.height == 0) {
-            frame.onGlobalLayout { applyGlueTransform() }
-            return
-        }
-        // Right after a turn the frame still reports its old size until the next layout. Use the size
-        // matching the current display orientation, so the very first frame is already glued.
-        val size = this.currentOrientedSize(frame.width, frame.height)
-        val w = size.x
-        val h = size.y
-
-        val surfaceParams = binding.videoSurface.layoutParams
-        if (surfaceParams.width != w || surfaceParams.height != h) {
-            surfaceParams.width = w
-            surfaceParams.height = h
-            binding.videoSurface.layoutParams = surfaceParams
-        }
-
-        val vw = mVideoSize.x.toFloat()
-        val vh = mVideoSize.y.toFloat()
-        if (vw <= 0f || vh <= 0f) {
-            return
-        }
-
-        binding.videoSurface.setTransform(buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh))
-    }
-
-    // Un-stretches the surface, rotates the content by 90° when the window orientation does not
-    // match the video's fill orientation, and scales it to fill the screen, centered.
-    private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
-        val fillLandscape = when {
-            vw > vh -> true
-            vw < vh -> false
-            else -> null
-        }
-        // Same formula as photos: counter-rotate by the display rotation, so the video keeps one
-        // orientation relative to the physical screen and never flips 180°.
-        val rotation = this@VideoPlayerActivity.getGlueRotation(fillLandscape).toFloat()
-        val swapped = rotation == 90f || rotation == 270f
-        val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
-        val contentWidth = vw * scale
-        val contentHeight = vh * scale
-        return Matrix().apply {
-            postTranslate(-w / 2f, -h / 2f)
-            postScale(contentWidth / w, contentHeight / h)
-            postRotate(rotation)
-            postTranslate(w / 2f, h / 2f)
-        }
+        applyTextureGlue(binding.videoSurfaceFrame, binding.videoSurface, mVideoSize.x, mVideoSize.y)
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null
@@ -749,7 +713,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
                 }
             }
         }
-        displayManager.registerDisplayListener(listener, Handler())
+        displayManager.registerDisplayListener(listener, Handler(Looper.getMainLooper()))
         mDisplayListener = listener
     }
 
@@ -813,6 +777,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         }.withEndAction {
             binding.videoAppbar.beVisibleIf(newAlpha == 1f)
         }.start()
+        animateViewerTitle(!isFullScreen)
     }
 
     private fun showPlaybackSpeedPicker() {

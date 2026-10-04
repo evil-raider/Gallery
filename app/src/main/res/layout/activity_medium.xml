@@ -43,7 +43,6 @@
             android:layout_height="?attr/actionBarSize"
             app:menu="@menu/menu_viewpager"
             app:navigationIcon="@drawable/ic_arrow_left_vector"
-            app:titleCentered="@bool/medium_viewer_title_centered"
             app:titleTextAppearance="@style/MediumViewerToolbarTitle" />
 
     </com.google.android.material.appbar.AppBarLayout>
