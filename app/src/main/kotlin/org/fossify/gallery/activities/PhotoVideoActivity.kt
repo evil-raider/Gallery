@@ -439,4 +439,6 @@ open class PhotoVideoActivity : BaseViewerActivity(), ViewPagerFragment.Fragment
     override fun isSlideShowActive() = false
 
     override fun isFullScreen() = mIsFullScreen
+
+    override fun getFillRotation(path: String) = 0
 }
