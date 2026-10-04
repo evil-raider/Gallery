@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Center the viewer top bar title in landscape. -->
+    <bool name="medium_viewer_title_centered">true</bool>
+</resources>

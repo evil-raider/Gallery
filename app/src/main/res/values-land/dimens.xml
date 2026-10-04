@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Distance from the top of the screen to the line of the viewer top bar (icons + title). -->
-    <dimen name="medium_viewer_top_bar_center">14dp</dimen>
+    <!-- Distance from the top of the screen to the line of the viewer top bar (icons + title).
+         Keep it below the status bar so the buttons stay tappable in landscape. -->
+    <dimen name="medium_viewer_top_bar_center">44dp</dimen>
 </resources>
