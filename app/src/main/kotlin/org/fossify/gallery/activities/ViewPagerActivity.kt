@@ -1411,10 +1411,10 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         }
     }
 
-    // Lift the top bar (back button, title, menu icons) into the empty space the app bar keeps for
-    // the status bar / cutout. The lift never exceeds that top padding, so nothing leaves the screen,
-    // and the title gets its own extra offset (landscape: up to the very top, above the icons, which
-    // stay just below the status bar icons so they do not overlap them).
+    // Lift the whole top bar (back button, title, menu icons - all on one line, the title is centered
+    // vertically like the icons) so its line sits at medium_viewer_top_bar_center from the top of the
+    // screen. It only ever moves up, into the space the app bar keeps for the status bar / cutout.
+    // In landscape the line is near the very top edge (it may overlap the status bar icons).
     private fun setupToolbarLift() {
         binding.mediumViewerAppbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             applyToolbarLift()
@@ -1424,15 +1424,14 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private fun applyToolbarLift() {
         val appbar = binding.mediumViewerAppbar
         val toolbar = binding.mediumViewerToolbar
-        val lift = minOf(resources.getDimensionPixelSize(R.dimen.medium_viewer_toolbar_lift), appbar.paddingTop)
-        if (toolbar.translationY != -lift.toFloat()) {
-            toolbar.translationY = -lift.toFloat()
+        if (toolbar.height == 0) {
+            return
         }
-        // The title may go above the toolbar, but never above the screen edge.
-        val toolbarTop = appbar.paddingTop - lift
-        val titleMargin = maxOf(resources.getDimensionPixelSize(R.dimen.medium_viewer_title_margin_top), -toolbarTop)
-        if (toolbar.titleMarginTop != titleMargin) {
-            toolbar.titleMarginTop = titleMargin
+        val targetCenter = resources.getDimensionPixelSize(R.dimen.medium_viewer_top_bar_center)
+        val naturalCenter = appbar.top + appbar.paddingTop + toolbar.height / 2
+        val translation = minOf(0, targetCenter - naturalCenter).toFloat()
+        if (toolbar.translationY != translation) {
+            toolbar.translationY = translation
         }
     }
 

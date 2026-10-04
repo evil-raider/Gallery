@@ -29,6 +29,6 @@
     <dimen name="sample_thumbnail_size">180dp</dimen>
     <dimen name="directory_picker_dialog_min_height">180dp</dimen>
     <dimen name="smaller_icon_size">36dp</dimen>
-    <dimen name="medium_viewer_title_margin_top">16dp</dimen>
-    <dimen name="medium_viewer_toolbar_lift">26dp</dimen>
+    <!-- Distance from the top of the screen to the line of the viewer top bar (icons + title). -->
+    <dimen name="medium_viewer_top_bar_center">44dp</dimen>
 </resources>
