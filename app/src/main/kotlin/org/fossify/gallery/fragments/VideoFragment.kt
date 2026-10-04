@@ -84,6 +84,7 @@ import org.fossify.gallery.helpers.Config
 import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
+import org.fossify.gallery.helpers.applyGlueLayout
 import org.fossify.gallery.helpers.currentOrientedSize
 import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.MEDIUM
@@ -1066,18 +1067,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     // its center, and its fitCenter scaling then fills the screen the same way as the texture.
     private fun applyPreviewGlue(rotation: Int, w: Int, h: Int) {
         val preview = binding.videoPreview
-        val params = preview.layoutParams as RelativeLayout.LayoutParams
-        if (rotation == 0 || w == 0 || h == 0) {
-            params.width = ViewGroup.LayoutParams.MATCH_PARENT
-            params.height = ViewGroup.LayoutParams.MATCH_PARENT
-        } else {
-            val swapped = rotation % 180 != 0
-            params.width = if (swapped) h else w
-            params.height = if (swapped) w else h
-        }
-        params.addRule(RelativeLayout.CENTER_IN_PARENT)
-        preview.layoutParams = params
-        preview.rotation = rotation.toFloat()
+        preview.applyGlueLayout(rotation, w, h)
         preview.alpha = 1f
     }
 

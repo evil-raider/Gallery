@@ -3,6 +3,9 @@ package org.fossify.gallery.helpers
 import android.app.Activity
 import android.graphics.Point
 import android.view.Surface
+import android.view.View
+import android.view.ViewGroup
+import android.widget.RelativeLayout
 import android.view.WindowManager
 
 /**
@@ -67,4 +70,32 @@ fun Activity.currentOrientedSize(width: Int, height: Int): Point {
     }
     val displayLandscape = real.x > real.y
     return if ((width > height) == displayLandscape) Point(width, height) else Point(height, width)
+}
+
+// Lays out a RelativeLayout child for gluing: in a 90°/270° rotation it gets the swapped size
+// (frameHeight x frameWidth), centered, and is rotated around its center so it fills the frame.
+// RelativeLayout clamps a child to its own bounds (a 2000px-wide child in a 900px-wide parent
+// becomes 900px -> a square -> the media shrank with bars on all 4 sides). Negative margins
+// enlarge the available space so the child really gets the swapped size.
+// Returns true when the layout size changed.
+fun View.applyGlueLayout(rotation: Int, frameWidth: Int, frameHeight: Int): Boolean {
+    val params = layoutParams as RelativeLayout.LayoutParams
+    val swapped = rotation % 180 != 0 && frameWidth > 0 && frameHeight > 0
+    val newWidth = if (swapped) frameHeight else ViewGroup.LayoutParams.MATCH_PARENT
+    val newHeight = if (swapped) frameWidth else ViewGroup.LayoutParams.MATCH_PARENT
+    val marginX = if (swapped) minOf(0, (frameWidth - frameHeight) / 2) else 0
+    val marginY = if (swapped) minOf(0, (frameHeight - frameWidth) / 2) else 0
+    val changed = params.width != newWidth || params.height != newHeight ||
+        params.leftMargin != marginX || params.topMargin != marginY
+    if (changed) {
+        params.width = newWidth
+        params.height = newHeight
+        params.setMargins(marginX, marginY, marginX, marginY)
+        params.marginStart = marginX
+        params.marginEnd = marginX
+        params.addRule(RelativeLayout.CENTER_IN_PARENT)
+        layoutParams = params
+    }
+    this.rotation = rotation.toFloat()
+    return changed
 }

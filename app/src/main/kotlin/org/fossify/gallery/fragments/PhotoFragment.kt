@@ -94,6 +94,7 @@ import org.fossify.gallery.helpers.NORMAL_TILE_DPI
 import org.fossify.gallery.helpers.PicassoRegionDecoder
 import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
 import org.fossify.gallery.helpers.WEIRD_TILE_DPI
+import org.fossify.gallery.helpers.applyGlueLayout
 import org.fossify.gallery.helpers.currentOrientedSize
 import org.fossify.gallery.models.Medium
 import org.fossify.gallery.svg.SvgSoftwareLayerSetter
@@ -953,8 +954,6 @@ class PhotoFragment : ViewPagerFragment() {
     private fun applyViewGlue(degrees: Int) {
         val activity = activity ?: return
         val rotation = normalizeRotation(degrees)
-        val swapped = rotation % 180 != 0
-
         // During a turn the holder may still have the old size: match it to the display orientation.
         val size = activity.currentOrientedSize(binding.photoHolder.width, binding.photoHolder.height)
         val w = size.x
@@ -962,17 +961,9 @@ class PhotoFragment : ViewPagerFragment() {
 
         var sizeChanged = false
         for (view in listOf<View>(binding.gesturesView, binding.subsamplingView)) {
-            val params = view.layoutParams as RelativeLayout.LayoutParams
-            val newWidth = if (swapped) h else ViewGroup.LayoutParams.MATCH_PARENT
-            val newHeight = if (swapped) w else ViewGroup.LayoutParams.MATCH_PARENT
-            if (params.width != newWidth || params.height != newHeight) {
+            if (view.applyGlueLayout(rotation, w, h)) {
                 sizeChanged = true
-                params.width = newWidth
-                params.height = newHeight
-                params.addRule(RelativeLayout.CENTER_IN_PARENT)
-                view.layoutParams = params
             }
-            view.rotation = rotation.toFloat()
         }
 
         if (sizeChanged) {

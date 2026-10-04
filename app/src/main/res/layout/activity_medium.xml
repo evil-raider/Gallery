@@ -30,6 +30,8 @@
         android:layout_height="wrap_content"
         android:layout_alignParentTop="true"
         android:background="@android:color/transparent"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:elevation="0dp"
         app:elevation="0dp">
 
