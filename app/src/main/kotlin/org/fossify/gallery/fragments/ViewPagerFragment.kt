@@ -41,6 +41,9 @@ abstract class ViewPagerFragment : Fragment() {
         fun isFullScreen(): Boolean
 
         fun getFillRotation(path: String): Int
+
+        // True when the viewer keeps media glued (aspect ratio + device rotation, not locked).
+        fun isFillGlueEnabled(): Boolean = false
     }
 
     fun getMediumExtendedDetails(medium: Medium): String {

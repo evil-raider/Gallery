@@ -84,6 +84,7 @@ import org.fossify.gallery.helpers.DRAG_THRESHOLD
 import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
+import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.GO_TO_NEXT_ITEM
 import org.fossify.gallery.helpers.GO_TO_PREV_ITEM
 import org.fossify.gallery.helpers.HIDE_SYSTEM_UI_DELAY
@@ -690,12 +691,14 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     // Un-stretches the surface, rotates the content by 90° when the window orientation does not
     // match the video's fill orientation, and scales it to fill the screen, centered.
     private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
-        val windowLandscape = w >= h
-        val fillLandscape = vw >= vh
-        // Add a 180° counter-rotation in the reversed orientations so the video stays upright and
-        // glued instead of flipping together with the window.
-        val reverse = if (isReverseDisplayRotation()) 180f else 0f
-        val rotation = ((if (windowLandscape == fillLandscape) 0f else 90f) + reverse) % 360f
+        val fillLandscape = when {
+            vw > vh -> true
+            vw < vh -> false
+            else -> null
+        }
+        // Same formula as photos: counter-rotate by the display rotation, so the video keeps one
+        // orientation relative to the physical screen and never flips 180°.
+        val rotation = this@VideoPlayerActivity.getGlueRotation(fillLandscape).toFloat()
         val swapped = rotation == 90f || rotation == 270f
         val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
         val contentWidth = vw * scale
@@ -706,13 +709,6 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
             postRotate(rotation)
             postTranslate(w / 2f, h / 2f)
         }
-    }
-
-    // True in the two "reversed" rotations (180°/270°), used to keep the glued video upright.
-    @Suppress("DEPRECATION")
-    private fun isReverseDisplayRotation(): Boolean {
-        val rotation = windowManager.defaultDisplay.rotation
-        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null

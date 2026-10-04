@@ -84,6 +84,7 @@ import org.fossify.gallery.helpers.Config
 import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
+import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.MEDIUM
 import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
 import org.fossify.gallery.interfaces.PlaybackSpeedListener
@@ -123,6 +124,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     private var mExoPlayer: ExoPlayer? = null
     private var mVideoSize = Point(1, 1)
     private var mGlueEnabled = false
+    private var mGlueRotation = 0
     private var mTimerHandler = Handler()
 
     private var mStoredShowExtendedDetails = false
@@ -283,6 +285,12 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         }
 
         storeStateVariables()
+        // In the glue mode decide before the first draw, and keep the preview hidden until it is
+        // glued, so it never shows upright first and then jumps into place.
+        mGlueEnabled = listener?.isFillGlueEnabled() == true && !mConfig.gestureVideoPlayer
+        if (mGlueEnabled) {
+            binding.videoPreview.alpha = 0f
+        }
         Glide.with(context).load(mMedium.path).into(binding.videoPreview)
 
         // setMenuVisibility is not called at VideoActivity (third party intent)
@@ -305,6 +313,11 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
                 mVideoSize.y = if (swap) resolution.x else resolution.y
                 activity.runOnUiThread {
                     setVideoSize()
+                }
+            } else {
+                // Size unknown: show the preview unglued rather than not at all.
+                activity.runOnUiThread {
+                    binding.videoPreview.alpha = 1f
                 }
             }
         }
@@ -981,6 +994,7 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         }
 
         mTextureView.setTransform(Matrix())
+        applyPreviewGlue(0, 0, 0)
 
         val videoProportion = mVideoSize.x.toFloat() / mVideoSize.y.toFloat()
         val display = requireActivity().windowManager.defaultDisplay
@@ -1037,18 +1051,44 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
             return
         }
 
-        mTextureView.setTransform(buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh))
+        val matrix = buildGlueMatrix(w.toFloat(), h.toFloat(), vw, vh)
+        mTextureView.setTransform(matrix)
+        applyPreviewGlue(mGlueRotation, w, h)
+    }
+
+    // The preview (shown before playback starts) is a separate ImageView, so glue it with exactly the
+    // same rotation as the playing video. Otherwise it rotates with the UI and the video visibly
+    // jumps/flips when playback starts. The view is sized to the swapped frame and rotated around
+    // its center, and its fitCenter scaling then fills the screen the same way as the texture.
+    private fun applyPreviewGlue(rotation: Int, w: Int, h: Int) {
+        val preview = binding.videoPreview
+        val params = preview.layoutParams as RelativeLayout.LayoutParams
+        if (rotation == 0 || w == 0 || h == 0) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT
+        } else {
+            val swapped = rotation % 180 != 0
+            params.width = if (swapped) h else w
+            params.height = if (swapped) w else h
+        }
+        params.addRule(RelativeLayout.CENTER_IN_PARENT)
+        preview.layoutParams = params
+        preview.rotation = rotation.toFloat()
+        preview.alpha = 1f
     }
 
     // Un-stretches the surface, rotates the content by 90° when the window orientation does not
     // match the video's fill orientation, and scales it to fill the screen, centered.
     private fun buildGlueMatrix(w: Float, h: Float, vw: Float, vh: Float): Matrix {
-        val windowLandscape = w >= h
-        val fillLandscape = vw >= vh
-        // Add a 180° counter-rotation in the reversed orientations so the video stays upright and
-        // glued instead of flipping together with the window.
-        val reverse = if (isReverseDisplayRotation()) 180f else 0f
-        val rotation = ((if (windowLandscape == fillLandscape) 0f else 90f) + reverse) % 360f
+        val fillLandscape = when {
+            vw > vh -> true
+            vw < vh -> false
+            else -> null
+        }
+        // Same formula as photos: counter-rotate by the display rotation, so the video keeps one
+        // orientation relative to the physical screen and never flips 180°.
+        mGlueRotation = requireActivity().getGlueRotation(fillLandscape)
+        val rotation = mGlueRotation.toFloat()
         val swapped = rotation == 90f || rotation == 270f
         val scale = if (!swapped) minOf(w / vw, h / vh) else minOf(w / vh, h / vw)
         val contentWidth = vw * scale
@@ -1059,13 +1099,6 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
             postRotate(rotation)
             postTranslate(w / 2f, h / 2f)
         }
-    }
-
-    // True in the two "reversed" rotations (180°/270°), used to keep the glued video upright.
-    @Suppress("DEPRECATION")
-    private fun isReverseDisplayRotation(): Boolean {
-        val rotation = (activity ?: return false).windowManager.defaultDisplay.rotation
-        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
     }
 
     // Rotation (0/90/180/270) the video must be displayed with, read from its metadata.

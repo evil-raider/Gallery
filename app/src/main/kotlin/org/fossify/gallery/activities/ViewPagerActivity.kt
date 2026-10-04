@@ -25,7 +25,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.provider.MediaStore
 import android.view.MenuItem
-import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
@@ -162,6 +161,7 @@ import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
+import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.SHOW_ALL
 import org.fossify.gallery.helpers.SHOW_FAVORITES
 import org.fossify.gallery.helpers.SHOW_NEXT_ITEM
@@ -1463,7 +1463,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private fun applyFillRotation(windowOrientation: Int) {
         val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
         when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> fragment.setFillRotation(computeFillRotation(getCurrentPath(), windowOrientation))
+            is PhotoFragment -> fragment.setFillRotation(computeFillRotation(getCurrentPath()))
             is VideoFragment -> fragment.setGlueEnabled(enabled)
         }
     }
@@ -1472,28 +1472,16 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // for pre-rotating a photo before it is first drawn (so it never visibly re-rotates after load).
     // Returns the degrees (0/90/180/270) the content must be rotated by to stay glued and filling,
     // including the 180° counter-rotation for the reversed device orientations.
-    override fun getFillRotation(path: String): Int =
-        computeFillRotation(path, resources.configuration.orientation)
+    override fun getFillRotation(path: String): Int = computeFillRotation(path)
 
-    private fun computeFillRotation(path: String, windowOrientation: Int): Int {
-        val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
-        if (!enabled) {
+    override fun isFillGlueEnabled(): Boolean =
+        config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
+
+    private fun computeFillRotation(path: String): Int {
+        if (!isFillGlueEnabled()) {
             return 0
         }
-        val reverse = if (isReverseDisplayRotation()) 180 else 0
-        val fillLandscape = getMediaFillLandscape(path) ?: return reverse
-        val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
-        val base = if (windowLandscape != fillLandscape) 90 else 0
-        return base + reverse
-    }
-
-    // True when the display is in one of the two "reversed" rotations (180°/270°). These share the
-    // same Configuration.orientation as their upright counterparts (0°/90°), so onConfigurationChanged
-    // alone cannot distinguish them; the DisplayListener below drives the refresh for those flips.
-    @Suppress("DEPRECATION")
-    private fun isReverseDisplayRotation(): Boolean {
-        val rotation = windowManager.defaultDisplay.rotation
-        return rotation == Surface.ROTATION_180 || rotation == Surface.ROTATION_270
+        return getGlueRotation(getMediaFillLandscape(path))
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null
