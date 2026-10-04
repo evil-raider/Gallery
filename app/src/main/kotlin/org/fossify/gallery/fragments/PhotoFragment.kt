@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.RelativeLayout
 import androidx.core.graphics.drawable.toBitmapOrNull
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat.Type
@@ -93,6 +94,7 @@ import org.fossify.gallery.helpers.NORMAL_TILE_DPI
 import org.fossify.gallery.helpers.PicassoRegionDecoder
 import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
 import org.fossify.gallery.helpers.WEIRD_TILE_DPI
+import org.fossify.gallery.helpers.currentOrientedSize
 import org.fossify.gallery.models.Medium
 import org.fossify.gallery.svg.SvgSoftwareLayerSetter
 import pl.droidsonroids.gif.InputSource
@@ -332,6 +334,17 @@ class PhotoFragment : ViewPagerFragment() {
             return
         }
 
+        // Glue mode: the media keeps the same physical size/orientation, so do NOT reload it (a reload
+        // shows the photo rotated with the screen first and then re-rotates it). Just re-glue the
+        // views synchronously so the very first frame after the turn is already correct.
+        if (listener?.isFillGlueEnabled() == true && !mMedium.isGIF()) {
+            refreshGlue()
+            measureScreen()
+            initExtendedDetails()
+            updateInstantSwitchWidths()
+            return
+        }
+
         // avoid GIFs being skewed, played in wrong aspect ratio
         if (mMedium.isGIF()) {
             mView.onGlobalLayout {
@@ -429,8 +442,9 @@ class PhotoFragment : ViewPagerFragment() {
             mImageOrientation = getImageOrientation()
             // Decide how the photo must be rotated to fill the screen BEFORE it is first drawn, so it
             // appears already glued instead of showing upright and then visibly re-rotating.
-            mFillRotationDegrees = listener?.getFillRotation(mMedium.path) ?: 0
+            val glueDegrees = listener?.getFillRotation(mMedium.path) ?: 0
             activity?.runOnUiThread {
+                applyViewGlue(glueDegrees)
                 when {
                     mMedium.isGIF() -> loadGif()
                     mMedium.isSVG() -> loadSVG()
@@ -918,25 +932,58 @@ class PhotoFragment : ViewPagerFragment() {
         return normalized
     }
 
-    // Called by the viewer in the "aspect ratio + device rotation" mode. It rotates only the
-    // displayed image content (not the view container), so swiping and zooming keep working,
-    // while the picture stays glued in the orientation that fills the screen.
+    // Called by the viewer in the "aspect ratio + device rotation" mode.
     fun setFillRotation(degrees: Int) {
-        val normalized = normalizeRotation(degrees)
-        if (mFillRotationDegrees == normalized) {
-            return
+        if (mWasInit) {
+            applyViewGlue(degrees)
         }
+    }
 
-        mFillRotationDegrees = normalized
+    // Re-glue using the viewer's current rotation (cached fill orientation, no I/O).
+    fun refreshGlue() {
         if (!mWasInit) {
             return
         }
+        applyViewGlue(listener?.getFillRotation(mMedium.path) ?: 0)
+    }
 
-        if (mIsSubsamplingVisible) {
-            val baseRotation = degreesForRotation(mImageOrientation)
-            binding.subsamplingView.orientation = normalizeRotation(baseRotation + mCurrentRotationDegrees + mFillRotationDegrees)
-        } else {
-            loadBitmap()
+    // Glue = rotate the media VIEWS (not the bitmap) around their center and give them the swapped
+    // size, so the photo keeps one orientation relative to the physical screen and still fills it.
+    // It is synchronous (no reload), so nothing is ever drawn rotated with the screen first.
+    private fun applyViewGlue(degrees: Int) {
+        val activity = activity ?: return
+        val rotation = normalizeRotation(degrees)
+        val swapped = rotation % 180 != 0
+
+        // During a turn the holder may still have the old size: match it to the display orientation.
+        val size = activity.currentOrientedSize(binding.photoHolder.width, binding.photoHolder.height)
+        val w = size.x
+        val h = size.y
+
+        var sizeChanged = false
+        for (view in listOf<View>(binding.gesturesView, binding.subsamplingView)) {
+            val params = view.layoutParams as RelativeLayout.LayoutParams
+            val newWidth = if (swapped) h else ViewGroup.LayoutParams.MATCH_PARENT
+            val newHeight = if (swapped) w else ViewGroup.LayoutParams.MATCH_PARENT
+            if (params.width != newWidth || params.height != newHeight) {
+                sizeChanged = true
+                params.width = newWidth
+                params.height = newHeight
+                params.addRule(RelativeLayout.CENTER_IN_PARENT)
+                view.layoutParams = params
+            }
+            view.rotation = rotation.toFloat()
+        }
+
+        if (sizeChanged) {
+            binding.photoHolder.onGlobalLayout {
+                if (this.activity != null) {
+                    binding.gesturesView.controller.resetState()
+                    if (mIsSubsamplingVisible) {
+                        binding.subsamplingView.resetView()
+                    }
+                }
+            }
         }
     }
 

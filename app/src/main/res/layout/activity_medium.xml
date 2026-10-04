@@ -38,7 +38,8 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:menu="@menu/menu_viewpager"
-            android:paddingBottom="@dimen/medium_viewer_toolbar_padding_bottom"
+            android:gravity="top"
+            app:titleMarginTop="@dimen/medium_viewer_title_margin_top"
             app:navigationIcon="@drawable/ic_arrow_left_vector"
             app:titleTextAppearance="@style/MediumViewerToolbarTitle" />
 

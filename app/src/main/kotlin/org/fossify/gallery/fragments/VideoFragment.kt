@@ -84,6 +84,7 @@ import org.fossify.gallery.helpers.Config
 import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
+import org.fossify.gallery.helpers.currentOrientedSize
 import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.MEDIUM
 import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
@@ -1033,12 +1034,15 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
     // gesture layer's own fit stays identity and does not fight the rotation.
     private fun applyGlueTransform() {
         val frame = binding.videoSurfaceFrame
-        val w = frame.width
-        val h = frame.height
-        if (w == 0 || h == 0) {
+        if (frame.width == 0 || frame.height == 0) {
             frame.onGlobalLayout { applyGlueTransform() }
             return
         }
+        // Right after a turn the frame still reports its old size until the next layout. Use the size
+        // matching the current display orientation, so the very first frame is already glued.
+        val size = requireActivity().currentOrientedSize(frame.width, frame.height)
+        val w = size.x
+        val h = size.y
 
         mTextureView.layoutParams = mTextureView.layoutParams.apply {
             width = w

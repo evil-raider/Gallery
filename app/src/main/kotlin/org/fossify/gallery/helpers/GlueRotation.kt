@@ -3,6 +3,7 @@ package org.fossify.gallery.helpers
 import android.app.Activity
 import android.graphics.Point
 import android.view.Surface
+import android.view.WindowManager
 
 /**
  * Clockwise rotation (0/90/180/270) to apply to media content, relative to the window, so it stays
@@ -36,4 +37,34 @@ fun Activity.getGlueRotation(fillLandscape: Boolean?): Int {
     val size = Point()
     display.getRealSize(size)
     return computeGlueRotation(fillLandscape, size.x > size.y, display.rotation)
+}
+
+// No rotation animation while glued: the system would otherwise spin the old frame by 90° together
+// with the window (the media visibly "rotates with the screen" and then snaps back). SEAMLESS keeps
+// the content physically still (like a camera viewfinder) and falls back to a cross-fade/jump-cut
+// where seamless is not possible (e.g. 180° flips), so the media never visibly turns.
+fun Activity.setSeamlessRotation(enabled: Boolean) {
+    val wanted = if (enabled) {
+        WindowManager.LayoutParams.ROTATION_ANIMATION_SEAMLESS
+    } else {
+        WindowManager.LayoutParams.ROTATION_ANIMATION_ROTATE
+    }
+    val attributes = window.attributes
+    if (attributes.rotationAnimation != wanted) {
+        attributes.rotationAnimation = wanted
+        window.attributes = attributes
+    }
+}
+
+// Frame size that matches the CURRENT display orientation. Right after a turn the views can still
+// report their old size until the next layout; swapping it keeps the first frame already correct.
+@Suppress("DEPRECATION")
+fun Activity.currentOrientedSize(width: Int, height: Int): Point {
+    val real = Point()
+    windowManager.defaultDisplay.getRealSize(real)
+    if (width == 0 || height == 0) {
+        return real
+    }
+    val displayLandscape = real.x > real.y
+    return if ((width > height) == displayLandscape) Point(width, height) else Point(height, width)
 }

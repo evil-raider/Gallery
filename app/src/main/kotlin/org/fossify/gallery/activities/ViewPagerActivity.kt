@@ -162,6 +162,7 @@ import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
 import org.fossify.gallery.helpers.getGlueRotation
+import org.fossify.gallery.helpers.setSeamlessRotation
 import org.fossify.gallery.helpers.SHOW_ALL
 import org.fossify.gallery.helpers.SHOW_FAVORITES
 import org.fossify.gallery.helpers.SHOW_NEXT_ITEM
@@ -1460,11 +1461,17 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // media content by 90° whenever the window orientation does not match its fill orientation.
     // This keeps the photo/video filling the screen and visually "glued" while the system bars and
     // controls rotate normally. Photos use a Glide/subsampling rotation, videos a texture matrix.
-    private fun applyFillRotation(windowOrientation: Int) {
-        val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
-        when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> fragment.setFillRotation(computeFillRotation(getCurrentPath()))
-            is VideoFragment -> fragment.setGlueEnabled(enabled)
+    private fun applyFillRotation(@Suppress("UNUSED_PARAMETER") windowOrientation: Int) {
+        val enabled = isFillGlueEnabled()
+        setSeamlessRotation(enabled)
+        // Re-glue EVERY created page, not only the current one: the pager keeps neighbours alive,
+        // and a stale neighbour would show rotated with the screen and then re-rotate on swipe.
+        val fragments = (binding.viewPager.adapter as? MyPagerAdapter)?.getAllFragments() ?: return
+        for (fragment in fragments) {
+            when (fragment) {
+                is PhotoFragment -> if (enabled) fragment.refreshGlue() else fragment.setFillRotation(0)
+                is VideoFragment -> fragment.setGlueEnabled(enabled)
+            }
         }
     }
 
@@ -1481,7 +1488,26 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         if (!isFillGlueEnabled()) {
             return 0
         }
-        return getGlueRotation(getMediaFillLandscape(path))
+        return getGlueRotation(getCachedFillLandscape(path))
+    }
+
+    // The fill orientation of a file never changes, so read EXIF/resolution once. Re-gluing on every
+    // turn then is pure math on the main thread, with no I/O.
+    private val mFillLandscapeCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private fun getCachedFillLandscape(path: String): Boolean? {
+        val code = mFillLandscapeCache.getOrPut(path) {
+            when (getMediaFillLandscape(path)) {
+                true -> 1
+                false -> 0
+                null -> -1
+            }
+        }
+        return when (code) {
+            1 -> true
+            0 -> false
+            else -> null
+        }
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null
@@ -1513,9 +1539,13 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     private fun resetFillRotation() {
-        when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> fragment.setFillRotation(0)
-            is VideoFragment -> fragment.setGlueEnabled(false)
+        setSeamlessRotation(false)
+        val fragments = (binding.viewPager.adapter as? MyPagerAdapter)?.getAllFragments() ?: return
+        for (fragment in fragments) {
+            when (fragment) {
+                is PhotoFragment -> fragment.setFillRotation(0)
+                is VideoFragment -> fragment.setGlueEnabled(false)
+            }
         }
     }
 
