@@ -1415,7 +1415,9 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // Lift the whole top bar (back button, title, menu icons - all on one line, the title is centered
     // vertically like the icons) so its line sits at medium_viewer_top_bar_center from the top of the
     // screen. It only ever moves up, into the space the app bar keeps for the status bar / cutout.
-    // In landscape the line is near the very top edge (it may overlap the status bar icons).
+    // In portrait the line sits at medium_viewer_top_bar_center. In landscape the lift is disabled
+    // (medium_viewer_lift_top_bar = false), so the bar stays at its natural position directly below
+    // the status bar and its buttons never overlap the status bar icons.
     private fun setupToolbarLift() {
         binding.mediumViewerAppbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             applyToolbarLift()
@@ -1428,9 +1430,14 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         if (toolbar.height == 0) {
             return
         }
-        val targetCenter = resources.getDimensionPixelSize(R.dimen.medium_viewer_top_bar_center)
-        val naturalCenter = appbar.top + appbar.paddingTop + toolbar.height / 2
-        val translation = minOf(0, targetCenter - naturalCenter).toFloat()
+        val translation = if (resources.getBoolean(R.bool.medium_viewer_lift_top_bar)) {
+            val targetCenter = resources.getDimensionPixelSize(R.dimen.medium_viewer_top_bar_center)
+            val naturalCenter = appbar.top + appbar.paddingTop + toolbar.height / 2
+            minOf(0, targetCenter - naturalCenter).toFloat()
+        } else {
+            // Landscape: keep the bar at its natural position, right below the status bar.
+            0f
+        }
         if (toolbar.translationY != translation) {
             toolbar.translationY = translation
         }

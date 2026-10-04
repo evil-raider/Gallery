@@ -3,4 +3,6 @@
     <bool name="require_all_files_access">true</bool>
     <!-- Center the viewer top bar title. Portrait keeps it left-aligned. -->
     <bool name="medium_viewer_title_centered">false</bool>
+    <!-- Lift the viewer top bar into the status bar space. Disabled in landscape so the bar sits right below the status bar. -->
+    <bool name="medium_viewer_lift_top_bar">true</bool>
 </resources>

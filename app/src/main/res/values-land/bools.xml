@@ -2,4 +2,6 @@
 <resources>
     <!-- Center the viewer top bar title in landscape. -->
     <bool name="medium_viewer_title_centered">true</bool>
+    <!-- Keep the viewer top bar at its natural position, right below the status bar (no lift in landscape). -->
+    <bool name="medium_viewer_lift_top_bar">false</bool>
 </resources>
