@@ -28,7 +28,6 @@
         android:id="@+id/medium_viewer_appbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/medium_viewer_appbar_margin_top"
         android:layout_alignParentTop="true"
         android:background="@android:color/transparent"
         android:elevation="0dp"
@@ -39,6 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:menu="@menu/menu_viewpager"
+            android:paddingBottom="@dimen/medium_viewer_toolbar_padding_bottom"
             app:navigationIcon="@drawable/ic_arrow_left_vector"
             app:titleTextAppearance="@style/MediumViewerToolbarTitle" />
 

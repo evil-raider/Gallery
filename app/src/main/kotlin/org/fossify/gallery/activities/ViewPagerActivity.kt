@@ -1435,16 +1435,18 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     // true for wide media, false for tall media, null when it cannot be determined.
-    private fun getCurrentMediaFillLandscape(): Boolean? {
+    private fun getCurrentMediaFillLandscape(): Boolean? = getMediaFillLandscape(getCurrentPath())
+
+    private fun getMediaFillLandscape(path: String): Boolean? {
         var flipSides = false
         try {
-            val exif = ExifInterface(getCurrentPath())
+            val exif = ExifInterface(path)
             val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1)
             flipSides = orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_ROTATE_270
         } catch (e: Exception) {
         }
 
-        val resolution = applicationContext.getResolution(getCurrentPath()) ?: return null
+        val resolution = applicationContext.getResolution(path) ?: return null
         val width = if (flipSides) resolution.y else resolution.x
         val height = if (flipSides) resolution.x else resolution.y
         return when {
@@ -1460,20 +1462,29 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // controls rotate normally. Photos use a Glide/subsampling rotation, videos a texture matrix.
     private fun applyFillRotation(windowOrientation: Int) {
         val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
-        val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
-        // When the device is held in a reversed orientation the whole window is flipped 180°, which
-        // would also flip the media. Add a 180° counter-rotation so the photo/video stays upright and
-        // glued in its fill orientation while the system bars and controls keep rotating normally.
-        val reverse = if (enabled && isReverseDisplayRotation()) 180 else 0
         when (val fragment = getCurrentFragment()) {
-            is PhotoFragment -> {
-                val fillLandscape = getCurrentMediaFillLandscape()
-                val base = if (enabled && fillLandscape != null && windowLandscape != fillLandscape) 90 else 0
-                fragment.setFillRotation(base + reverse)
-            }
-
+            is PhotoFragment -> fragment.setFillRotation(computeFillRotation(getCurrentPath(), windowOrientation))
             is VideoFragment -> fragment.setGlueEnabled(enabled)
         }
+    }
+
+    // Single source of truth for a photo's fill rotation, reused both for live rotation updates and
+    // for pre-rotating a photo before it is first drawn (so it never visibly re-rotates after load).
+    // Returns the degrees (0/90/180/270) the content must be rotated by to stay glued and filling,
+    // including the 180° counter-rotation for the reversed device orientations.
+    override fun getFillRotation(path: String): Int =
+        computeFillRotation(path, resources.configuration.orientation)
+
+    private fun computeFillRotation(path: String, windowOrientation: Int): Int {
+        val enabled = config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked
+        if (!enabled) {
+            return 0
+        }
+        val reverse = if (isReverseDisplayRotation()) 180 else 0
+        val fillLandscape = getMediaFillLandscape(path) ?: return reverse
+        val windowLandscape = windowOrientation == Configuration.ORIENTATION_LANDSCAPE
+        val base = if (windowLandscape != fillLandscape) 90 else 0
+        return base + reverse
     }
 
     // True when the display is in one of the two "reversed" rotations (180°/270°). These share the

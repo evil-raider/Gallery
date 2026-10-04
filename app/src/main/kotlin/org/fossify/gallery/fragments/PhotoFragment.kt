@@ -427,6 +427,9 @@ class PhotoFragment : ViewPagerFragment() {
 
         ensureBackgroundThread {
             mImageOrientation = getImageOrientation()
+            // Decide how the photo must be rotated to fill the screen BEFORE it is first drawn, so it
+            // appears already glued instead of showing upright and then visibly re-rotating.
+            mFillRotationDegrees = listener?.getFillRotation(mMedium.path) ?: 0
             activity?.runOnUiThread {
                 when {
                     mMedium.isGIF() -> loadGif()
