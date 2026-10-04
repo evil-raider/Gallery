@@ -96,6 +96,7 @@ import org.fossify.gallery.helpers.SHOULD_INIT_FRAGMENT
 import org.fossify.gallery.helpers.WEIRD_TILE_DPI
 import org.fossify.gallery.helpers.applyGlueLayout
 import org.fossify.gallery.helpers.currentOrientedSize
+import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.models.Medium
 import org.fossify.gallery.svg.SvgSoftwareLayerSetter
 import pl.droidsonroids.gif.InputSource
@@ -443,7 +444,7 @@ class PhotoFragment : ViewPagerFragment() {
             mImageOrientation = getImageOrientation()
             // Decide how the photo must be rotated to fill the screen BEFORE it is first drawn, so it
             // appears already glued instead of showing upright and then visibly re-rotating.
-            val glueDegrees = listener?.getFillRotation(mMedium.path) ?: 0
+            val glueDegrees = computeGlueDegrees()
             activity?.runOnUiThread {
                 applyViewGlue(glueDegrees)
                 when {
@@ -823,6 +824,7 @@ class PhotoFragment : ViewPagerFragment() {
                     val useHeight = if (fullRotation == 90 || fullRotation == 270) sWidth else sHeight
                     doubleTapZoomScale = getDoubleTapZoomScale(useWidth, useHeight)
                     mCurrentRotationDegrees = (mCurrentRotationDegrees + degrees) % 360
+                    refreshGlue()
                     loadBitmap(false)
 
                     // ugly, but it works
@@ -945,7 +947,22 @@ class PhotoFragment : ViewPagerFragment() {
         if (!mWasInit) {
             return
         }
-        applyViewGlue(listener?.getFillRotation(mMedium.path) ?: 0)
+        applyViewGlue(computeGlueDegrees())
+    }
+
+    // A manual 90°/270° rotation (rotate button) turns a wide photo into a tall one, so the fill
+    // orientation used for gluing must follow it, otherwise the photo would shrink with bars.
+    private fun computeGlueDegrees(): Int {
+        val listener = listener ?: return 0
+        val activity = activity ?: return 0
+        if (!listener.isFillGlueEnabled()) {
+            return 0
+        }
+        var fillLandscape = listener.getFillLandscape(mMedium.path)
+        if (fillLandscape != null && mCurrentRotationDegrees % 180 != 0) {
+            fillLandscape = !fillLandscape
+        }
+        return activity.getGlueRotation(fillLandscape)
     }
 
     // Glue = rotate the media VIEWS (not the bitmap) around their center and give them the swapped
@@ -983,6 +1000,7 @@ class PhotoFragment : ViewPagerFragment() {
             binding.subsamplingView.rotateBy(degrees)
         } else {
             mCurrentRotationDegrees = (mCurrentRotationDegrees + degrees) % 360
+            refreshGlue()
             mLoadZoomableViewHandler.removeCallbacksAndMessages(null)
             mIsSubsamplingVisible = false
             loadBitmap()

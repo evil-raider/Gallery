@@ -1045,9 +1045,11 @@ class VideoFragment : ViewPagerFragment(), TextureView.SurfaceTextureListener,
         val w = size.x
         val h = size.y
 
-        mTextureView.layoutParams = mTextureView.layoutParams.apply {
-            width = w
-            height = h
+        val surfaceParams = mTextureView.layoutParams
+        if (surfaceParams.width != w || surfaceParams.height != h) {
+            surfaceParams.width = w
+            surfaceParams.height = h
+            mTextureView.layoutParams = surfaceParams
         }
 
         val vw = mVideoSize.x.toFloat()

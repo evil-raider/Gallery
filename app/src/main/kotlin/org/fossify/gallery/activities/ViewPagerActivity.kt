@@ -161,6 +161,7 @@ import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO
 import org.fossify.gallery.helpers.ROTATE_BY_ASPECT_RATIO_AND_SENSOR
 import org.fossify.gallery.helpers.ROTATE_BY_DEVICE_ROTATION
 import org.fossify.gallery.helpers.ROTATE_BY_SYSTEM_SETTING
+import org.fossify.gallery.helpers.DisplayRotationFilter
 import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.setSeamlessRotation
 import org.fossify.gallery.helpers.SHOW_ALL
@@ -1521,8 +1522,12 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     // turn then is pure math on the main thread, with no I/O.
     private val mFillLandscapeCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    override fun getFillLandscape(path: String): Boolean? = getCachedFillLandscape(path)
+
+    // Keyed by path + modification time, so an edited/rotated-and-saved file is re-read.
     private fun getCachedFillLandscape(path: String): Boolean? {
-        val code = mFillLandscapeCache.getOrPut(path) {
+        val key = path + "|" + File(path).lastModified()
+        val code = mFillLandscapeCache.getOrPut(key) {
             when (getMediaFillLandscape(path)) {
                 true -> 1
                 false -> 0
@@ -1537,6 +1542,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null
+    private val mRotationFilter = DisplayRotationFilter()
 
     private fun registerDisplayListener() {
         if (mDisplayListener != null) {
@@ -1547,6 +1553,9 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             override fun onDisplayAdded(displayId: Int) {}
             override fun onDisplayRemoved(displayId: Int) {}
             override fun onDisplayChanged(displayId: Int) {
+                if (!mRotationFilter.isRotationChange(this@ViewPagerActivity, displayId)) {
+                    return
+                }
                 // Fires on every rotation, including 0°<->180° and 90°<->270° flips that keep the
                 // same Configuration.orientation, so re-glue the media and keep it from flipping 180°.
                 if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {

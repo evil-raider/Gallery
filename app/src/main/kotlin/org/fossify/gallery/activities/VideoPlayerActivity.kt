@@ -85,6 +85,7 @@ import org.fossify.gallery.helpers.EXOPLAYER_MAX_BUFFER_MS
 import org.fossify.gallery.helpers.EXOPLAYER_MIN_BUFFER_MS
 import org.fossify.gallery.helpers.FAST_FORWARD_VIDEO_MS
 import org.fossify.gallery.helpers.currentOrientedSize
+import org.fossify.gallery.helpers.DisplayRotationFilter
 import org.fossify.gallery.helpers.getGlueRotation
 import org.fossify.gallery.helpers.setSeamlessRotation
 import org.fossify.gallery.helpers.GO_TO_NEXT_ITEM
@@ -628,7 +629,9 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         // Aspect-ratio + sensor mode: the window rotates freely with the device while the video
         // content is counter-rotated through the texture matrix to stay glued and keep filling.
         if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
-            requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+            if (requestedOrientation != SCREEN_ORIENTATION_FULL_SENSOR) {
+                requestedOrientation = SCREEN_ORIENTATION_FULL_SENSOR
+            }
             setSeamlessRotation(true)
             applyGlueTransform()
             return
@@ -681,9 +684,11 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
         val w = size.x
         val h = size.y
 
-        binding.videoSurface.layoutParams = binding.videoSurface.layoutParams.apply {
-            width = w
-            height = h
+        val surfaceParams = binding.videoSurface.layoutParams
+        if (surfaceParams.width != w || surfaceParams.height != h) {
+            surfaceParams.width = w
+            surfaceParams.height = h
+            binding.videoSurface.layoutParams = surfaceParams
         }
 
         val vw = mVideoSize.x.toFloat()
@@ -719,6 +724,7 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
     }
 
     private var mDisplayListener: DisplayManager.DisplayListener? = null
+    private val mRotationFilter = DisplayRotationFilter()
 
     private fun registerDisplayListener() {
         if (mDisplayListener != null) {
@@ -729,6 +735,9 @@ open class VideoPlayerActivity : BaseViewerActivity(), SeekBar.OnSeekBarChangeLi
             override fun onDisplayAdded(displayId: Int) {}
             override fun onDisplayRemoved(displayId: Int) {}
             override fun onDisplayChanged(displayId: Int) {
+                if (!mRotationFilter.isRotationChange(this@VideoPlayerActivity, displayId)) {
+                    return
+                }
                 // Catch 0°<->180° and 90°<->270° flips that keep the same Configuration.orientation
                 // so the glued video is re-rendered and never flips 180°.
                 if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {

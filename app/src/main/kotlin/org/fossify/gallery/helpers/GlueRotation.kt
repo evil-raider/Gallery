@@ -99,3 +99,25 @@ fun View.applyGlueLayout(rotation: Int, frameWidth: Int, frameHeight: Int): Bool
     this.rotation = rotation.toFloat()
     return changed
 }
+
+// DisplayListener.onDisplayChanged also fires for refresh-rate switches (60/90/120 Hz, frame-rate
+// matching during video), HDR/brightness-related changes and other displays. Re-gluing on every such
+// event would force relayouts/redraws for nothing, so only report actual rotation changes of the
+// display this activity is on.
+class DisplayRotationFilter {
+    private var lastRotation = -1
+
+    @Suppress("DEPRECATION")
+    fun isRotationChange(activity: Activity, displayId: Int): Boolean {
+        val display = activity.windowManager.defaultDisplay
+        if (displayId != display.displayId) {
+            return false
+        }
+        val rotation = display.rotation
+        if (rotation == lastRotation) {
+            return false
+        }
+        lastRotation = rotation
+        return true
+    }
+}

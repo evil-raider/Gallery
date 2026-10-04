@@ -44,6 +44,9 @@ abstract class ViewPagerFragment : Fragment() {
 
         // True when the viewer keeps media glued (aspect ratio + device rotation, not locked).
         fun isFillGlueEnabled(): Boolean = false
+
+        // Fill orientation of the file (true = wide, false = tall, null = unknown/square), cached.
+        fun getFillLandscape(path: String): Boolean? = null
     }
 
     fun getMediumExtendedDetails(medium: Medium): String {
