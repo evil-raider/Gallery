@@ -41,4 +41,21 @@
             app:navigationIcon="@drawable/ic_arrow_left_vector" />
 
     </com.google.android.material.appbar.AppBarLayout>
+
+    <TextView
+        android:id="@+id/medium_viewer_landscape_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:ellipsize="middle"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxWidth="@dimen/landscape_title_max_width"
+        android:shadowColor="@android:color/black"
+        android:shadowRadius="4"
+        android:singleLine="true"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:visibility="gone" />
 </RelativeLayout>
