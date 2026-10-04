@@ -231,6 +231,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         setupEdgeToEdge(
             padBottomSystem = listOf(binding.bottomActions.bottomActionsWrapper),
         )
+        setupToolbarLift()
 
         setupOptionsMenu()
         refreshMenuItems()
@@ -413,6 +414,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         initBottomActionsLayout()
+        applyToolbarLift()
         // The window just rotated with the device; in the aspect-ratio + sensor mode the
         // whole UI rotates, so re-apply the counter-rotation that keeps the media glued.
         if (config.screenRotation == ROTATE_BY_ASPECT_RATIO_AND_SENSOR && !mIsOrientationLocked) {
@@ -1406,6 +1408,31 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
                     }
                 }
             }
+        }
+    }
+
+    // Lift the top bar (back button, title, menu icons) into the empty space the app bar keeps for
+    // the status bar / cutout. The lift never exceeds that top padding, so nothing leaves the screen,
+    // and the title gets its own extra offset (landscape: up to the very top, above the icons, which
+    // stay just below the status bar icons so they do not overlap them).
+    private fun setupToolbarLift() {
+        binding.mediumViewerAppbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            applyToolbarLift()
+        }
+    }
+
+    private fun applyToolbarLift() {
+        val appbar = binding.mediumViewerAppbar
+        val toolbar = binding.mediumViewerToolbar
+        val lift = minOf(resources.getDimensionPixelSize(R.dimen.medium_viewer_toolbar_lift), appbar.paddingTop)
+        if (toolbar.translationY != -lift.toFloat()) {
+            toolbar.translationY = -lift.toFloat()
+        }
+        // The title may go above the toolbar, but never above the screen edge.
+        val toolbarTop = appbar.paddingTop - lift
+        val titleMargin = maxOf(resources.getDimensionPixelSize(R.dimen.medium_viewer_title_margin_top), -toolbarTop)
+        if (toolbar.titleMarginTop != titleMargin) {
+            toolbar.titleMarginTop = titleMargin
         }
     }
 

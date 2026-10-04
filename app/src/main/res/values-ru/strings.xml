@@ -154,6 +154,7 @@
     <string name="screen_rotation_system_setting">Системные настройки</string>
     <string name="screen_rotation_device_rotation">При повороте устройства</string>
     <string name="screen_rotation_aspect_ratio">По размеру изображения</string>
+    <string name="screen_rotation_aspect_ratio_sensor">По размеру изображения и повороту устройства</string>
     <string name="black_background_at_fullscreen">Чёрные фон и строка состояния при просмотре изображения</string>
     <string name="scroll_thumbnails_horizontally">Прокрутка миниатюр по горизонтали</string>
     <string name="hide_system_ui_at_fullscreen">Автоматически скрывать системный интерфейс при просмотре изображения</string>
