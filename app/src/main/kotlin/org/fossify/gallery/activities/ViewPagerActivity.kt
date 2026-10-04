@@ -28,8 +28,6 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.core.graphics.drawable.toDrawable
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.print.PrintHelper
 import androidx.viewpager.widget.ViewPager
@@ -41,6 +39,7 @@ import com.bumptech.glide.request.RequestListener
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.request.target.Target
 import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.appbar.MaterialToolbar
 import org.fossify.commons.dialogs.PropertiesDialog
 import org.fossify.commons.dialogs.RenameItemDialog
 import org.fossify.commons.extensions.applyColorFilter
@@ -208,7 +207,6 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private var mRandomSlideshowStopped = false
 
     private var mIsOrientationLocked = false
-    private var mViewerTitle = ""
 
     private var mMediaFiles = ArrayList<Medium>()
     private var mFavoritePaths = ArrayList<String>()
@@ -223,13 +221,15 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override val appBarLayout: AppBarLayout
         get() = binding.mediumViewerAppbar
 
+    override val viewerToolbar: MaterialToolbar
+        get() = binding.mediumViewerToolbar
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(binding.root)
         setupEdgeToEdge(
             padBottomSystem = listOf(binding.bottomActions.bottomActionsWrapper),
         )
-        setupLandscapeTitleInsets()
 
         setupOptionsMenu()
         refreshMenuItems()
@@ -410,29 +410,6 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         initBottomActionsLayout()
-        setViewerTitle(mViewerTitle)
-    }
-
-    private fun isLandscape() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-    // In landscape the title is shown separately: centered, at the very top edge, over the status bar
-    private fun setViewerTitle(title: String) {
-        mViewerTitle = title
-        val landscape = isLandscape()
-        binding.mediumViewerToolbar.title = if (landscape) "" else title
-        binding.mediumViewerLandscapeTitle.apply {
-            text = title
-            beVisibleIf(landscape && !mIsFullScreen)
-            alpha = if (mIsFullScreen) 0f else 1f
-        }
-    }
-
-    private fun setupLandscapeTitleInsets() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.mediumViewerLandscapeTitle) { view, insets ->
-            val statusBarHeight = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars()).top
-            view.minimumHeight = statusBarHeight
-            insets
-        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1517,14 +1494,6 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             }.withEndAction {
                 binding.bottomActions.root.beVisibleIf(newAlpha == 1f)
             }.start()
-
-            if (isLandscape()) {
-                binding.mediumViewerLandscapeTitle.animate().alpha(newAlpha).withStartAction {
-                    binding.mediumViewerLandscapeTitle.beVisible()
-                }.withEndAction {
-                    binding.mediumViewerLandscapeTitle.beVisibleIf(newAlpha == 1f)
-                }.start()
-            }
 
             binding.mediumViewerAppbar.animate().alpha(newAlpha).withStartAction {
                 binding.mediumViewerAppbar.beVisible()

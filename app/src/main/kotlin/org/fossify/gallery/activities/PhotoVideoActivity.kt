@@ -10,6 +10,7 @@ import android.text.Html
 import android.view.View
 import androidx.core.graphics.drawable.toDrawable
 import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.appbar.MaterialToolbar
 import org.fossify.commons.dialogs.PropertiesDialog
 import org.fossify.commons.extensions.beGone
 import org.fossify.commons.extensions.beVisible
@@ -94,6 +95,9 @@ open class PhotoVideoActivity : BaseViewerActivity(), ViewPagerFragment.Fragment
 
     override val appBarLayout: AppBarLayout
         get() = binding.fragmentViewerAppbar
+
+    override val viewerToolbar: MaterialToolbar
+        get() = binding.fragmentViewerToolbar
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -254,7 +258,7 @@ open class PhotoVideoActivity : BaseViewerActivity(), ViewPagerFragment.Fragment
 
         mIsVideo = type == TYPE_VIDEOS
         mMedium = Medium(null, filename, mUri.toString(), mUri!!.path!!.getParentPath(), 0, 0, file.length(), type, 0, false, 0L, 0)
-        binding.fragmentViewerToolbar.title = Html.fromHtml("<font color='${Color.WHITE.toHex()}'>${mMedium!!.name}</font>")
+        setViewerTitle(Html.fromHtml("<font color='${Color.WHITE.toHex()}'>${mMedium!!.name}</font>"))
         bundle.putSerializable(MEDIUM, mMedium)
 
         if (savedInstanceState == null) {
