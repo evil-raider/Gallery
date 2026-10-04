@@ -41,6 +41,7 @@ import com.bumptech.glide.request.RequestListener
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.request.target.Target
 import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.appbar.MaterialToolbar
 import org.fossify.commons.dialogs.PropertiesDialog
 import org.fossify.commons.dialogs.RenameItemDialog
 import org.fossify.commons.extensions.applyColorFilter
@@ -226,6 +227,9 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     override val appBarLayout: AppBarLayout
         get() = binding.mediumViewerAppbar
 
+    override val viewerToolbar: MaterialToolbar
+        get() = binding.mediumViewerToolbar
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(binding.root)
@@ -262,7 +266,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         refreshMenuItems()
 
         val filename = getCurrentMedium()?.name ?: mPath.getFilenameFromPath()
-        binding.mediumViewerToolbar.title = filename
+        setViewerTitle(filename)
         registerDisplayListener()
     }
 
@@ -504,7 +508,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
             isShowingRecycleBin -> RECYCLE_BIN
             else -> mPath.getParentPath()
         }
-        binding.mediumViewerToolbar.title = mPath.getFilenameFromPath()
+        setViewerTitle(mPath.getFilenameFromPath())
 
         binding.viewPager.onGlobalLayout {
             if (!isDestroyed) {
@@ -818,7 +822,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
     private fun toggleFileVisibility(hide: Boolean, callback: (() -> Unit)? = null) {
         toggleFileVisibility(getCurrentPath(), hide) {
             val newFileName = it.getFilenameFromPath()
-            binding.mediumViewerToolbar.title = newFileName
+            setViewerTitle(newFileName)
 
             getCurrentMedium()!!.apply {
                 name = newFileName
@@ -1671,7 +1675,7 @@ class ViewPagerActivity : BaseViewerActivity(), ViewPager.OnPageChangeListener, 
         runOnUiThread {
             val medium = getCurrentMedium()
             if (medium != null) {
-                binding.mediumViewerToolbar.title = medium.path.getFilenameFromPath()
+                setViewerTitle(medium.path.getFilenameFromPath())
             }
         }
     }
